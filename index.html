@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0b0a08">
+    <title>KSiraa Orders</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#shop" aria-label="KSiraa home">
+          <img src="assets/ksiraa-logo.png" alt="KSiraa logo">
+          <span>
+            <strong>KSiraa</strong>
+            <small>Fresh dairy orders</small>
+          </span>
+        </a>
+        <nav class="tabs" aria-label="Primary">
+          <button class="tab active" data-view="shop" type="button">Order</button>
+          <button class="tab" data-view="account" type="button">My orders</button>
+          <button class="tab" data-view="admin" type="button">Admin</button>
+        </nav>
+      </header>
+
+      <main>
+        <section class="hero view-section" id="shop-view">
+          <div class="hero-copy">
+            <p class="eyebrow">Pure desi ghee and fresh dairy</p>
+            <h1>Fresh dairy orders without extra phone calls.</h1>
+            <p class="lead">Choose fresh dairy products, save your address, and place your order in a few taps.</p>
+            <div class="hero-actions">
+              <a class="primary-action" href="#products">Start order</a>
+              <button class="secondary-action" id="customer-login-open" type="button">Login with mobile</button>
+            </div>
+          </div>
+          <div class="hero-media" aria-label="KSiraa ghee jar">
+            <img src="assets/ksiraa-product.jpeg" alt="KSiraa desi ghee jar packaging">
+          </div>
+        </section>
+
+        <section class="notice-band" id="notice-list" aria-live="polite"></section>
+
+        <section class="order-layout view-section" id="products-view">
+          <div class="catalog">
+            <div class="section-heading">
+              <span>
+                <p class="eyebrow">Available now</p>
+                <h2>Products</h2>
+              </span>
+              <button class="small-action" id="refresh-products" type="button">Refresh</button>
+            </div>
+            <div class="product-grid" id="product-grid"></div>
+          </div>
+
+          <aside class="order-panel" aria-label="Order summary">
+            <div class="customer-status" id="customer-status"></div>
+            <h2>Your order</h2>
+            <form id="customer-form">
+              <label>
+                Name
+                <input id="customer-name" name="name" autocomplete="name" required placeholder="Customer name">
+              </label>
+              <label>
+                Mobile number
+                <input id="customer-phone" name="phone" inputmode="tel" autocomplete="tel" required placeholder="10 digit mobile">
+              </label>
+              <label>
+                Delivery address
+                <textarea id="customer-address" name="address" rows="3" required placeholder="House, area, landmark"></textarea>
+              </label>
+              <div class="form-row">
+                <label>
+                  Delivery frequency
+                  <select id="repeat-frequency" name="frequency">
+                    <option>Every day</option>
+                    <option selected>Weekly</option>
+                    <option>Twice a week</option>
+                    <option>Monthly</option>
+                    <option>One time</option>
+                  </select>
+                </label>
+                <label>
+                  Payment
+                  <select id="payment-method" name="payment">
+                    <option selected>Cash on delivery</option>
+                    <option>UPI on delivery</option>
+                    <option>Online payment</option>
+                  </select>
+                </label>
+              </div>
+              <div class="form-row">
+                <label>
+                  Preferred time
+                  <select id="delivery-time" name="time">
+                    <option>Morning</option>
+                    <option selected>Evening</option>
+                    <option>Any time</option>
+                  </select>
+                </label>
+              </div>
+            </form>
+            <div class="summary-list" id="summary-list"></div>
+            <div class="summary-total">
+              <span>Total</span>
+              <strong id="order-total">Rs. 0</strong>
+            </div>
+            <div class="panel-actions">
+              <button class="primary-action full" id="place-order" type="button">Place order</button>
+              <button class="secondary-action full" id="send-whatsapp" type="button">Also send WhatsApp</button>
+            </div>
+          </aside>
+        </section>
+
+        <section class="account-view view-section hidden" id="account-view" aria-label="My orders">
+          <div class="section-heading">
+            <span>
+              <p class="eyebrow">Customer account</p>
+              <h2>My orders</h2>
+            </span>
+            <button class="small-action" id="customer-logout" type="button">Logout</button>
+          </div>
+          <div class="orders-list" id="my-orders"></div>
+        </section>
+
+        <section class="admin-view view-section hidden" id="admin-view" aria-label="Admin panel">
+          <div class="section-heading">
+            <span>
+              <p class="eyebrow">Owner controls</p>
+              <h2>Admin panel</h2>
+            </span>
+            <p class="admin-pin">Default admin: <strong id="admin-phone-label">9999999999</strong></p>
+          </div>
+
+          <form class="admin-lock" id="admin-login">
+            <h3>Admin login</h3>
+            <p>Use the owner login to manage products, stock, orders, customers, and announcements.</p>
+            <label>
+              Mobile number
+              <input id="admin-phone" inputmode="tel" autocomplete="tel" required placeholder="Admin mobile">
+            </label>
+            <label>
+              Password
+              <input id="admin-password" type="password" required placeholder="Admin password">
+            </label>
+            <button class="primary-action full" type="submit">Login</button>
+            <p class="helper-text">Default password for local setup: <strong>ksiraa2468</strong>. Change it before public use.</p>
+          </form>
+
+          <div class="admin-grid hidden" id="admin-content">
+            <form class="admin-card" id="product-form">
+              <h3>Add product</h3>
+              <label>
+                Product name
+                <input id="new-product-name" required placeholder="Paneer">
+              </label>
+              <label>
+                Pack size
+                <input id="new-product-size" required placeholder="250 g">
+              </label>
+              <label>
+                Price
+                <input id="new-product-price" required inputmode="numeric" placeholder="180">
+              </label>
+              <label>
+                Description
+                <textarea id="new-product-description" rows="3" placeholder="Freshly made today"></textarea>
+              </label>
+              <button class="primary-action full" type="submit">Add product</button>
+            </form>
+
+            <div class="admin-card">
+              <h3>Product status</h3>
+              <div class="admin-products" id="admin-products"></div>
+            </div>
+
+            <form class="admin-card broadcast-card" id="broadcast-form">
+              <h3>Send update</h3>
+              <label>
+                Message title
+                <input id="broadcast-title" required placeholder="Fresh paneer available">
+              </label>
+              <label>
+                Message
+                <textarea id="broadcast-message" required rows="5" placeholder="Tell customers about new products, offers, or delivery updates."></textarea>
+              </label>
+              <div class="panel-actions">
+                <button class="primary-action full" type="submit">Publish update</button>
+                <button class="secondary-action full" id="broadcast-whatsapp" type="button">Open WhatsApp</button>
+              </div>
+            </form>
+
+            <div class="admin-card wide-card">
+              <h3>Orders</h3>
+              <div class="orders-list" id="admin-orders"></div>
+            </div>
+
+            <div class="admin-card">
+              <h3>Customers</h3>
+              <div class="customers-list" id="admin-customers"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+      <footer class="site-footer">
+        <a href="privacy.html">Privacy Policy</a>
+        <a href="terms.html">Terms</a>
+      </footer>
+    </div>
+
+    <div class="modal hidden" id="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
+      <div class="modal-panel">
+        <button class="modal-close" id="login-close" type="button" aria-label="Close">x</button>
+        <h2 id="login-title">Login with mobile</h2>
+        <p class="helper-text">For local testing, the OTP is <strong>123456</strong>. In production this connects to an SMS provider.</p>
+        <form id="otp-request-form">
+          <label>
+            Mobile number
+            <input id="otp-phone" inputmode="tel" autocomplete="tel" required placeholder="10 digit mobile">
+          </label>
+          <button class="primary-action full" type="submit">Send OTP</button>
+        </form>
+        <form class="hidden" id="otp-verify-form">
+          <label>
+            Enter OTP
+            <input id="otp-code" inputmode="numeric" required placeholder="123456">
+          </label>
+          <button class="primary-action full" type="submit">Verify and continue</button>
+        </form>
+      </div>
+    </div>
+
+    <template id="product-template">
+      <article class="product-card">
+        <div>
+          <p class="product-size"></p>
+          <h3></h3>
+          <p class="product-description"></p>
+        </div>
+        <div class="product-footer">
+          <strong class="product-price"></strong>
+          <div class="qty-control" aria-label="Quantity selector">
+            <button class="qty-minus" type="button">-</button>
+            <span class="qty-value">0</span>
+            <button class="qty-plus" type="button">+</button>
+          </div>
+        </div>
+      </article>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>
