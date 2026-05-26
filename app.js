@@ -3,8 +3,8 @@ const state = {
   products: [],
   cart: JSON.parse(localStorage.getItem("ksiraa-cart") || "{}"),
   notices: [],
-  customer: null,
-  customerToken: localStorage.getItem("ksiraa-customer-token") || "",
+  myOrders: JSON.parse(localStorage.getItem("ksiraa-my-orders") || "[]"),
+  customerProfile: JSON.parse(localStorage.getItem("ksiraa-customer-profile") || "null"),
   adminToken: localStorage.getItem("ksiraa-admin-token") || "",
   admin: {
     orders: [],
@@ -18,7 +18,6 @@ const els = {
   summaryList: document.querySelector("#summary-list"),
   orderTotal: document.querySelector("#order-total"),
   noticeList: document.querySelector("#notice-list"),
-  customerStatus: document.querySelector("#customer-status"),
   adminProducts: document.querySelector("#admin-products"),
   adminOrders: document.querySelector("#admin-orders"),
   adminCustomers: document.querySelector("#admin-customers"),
@@ -29,12 +28,11 @@ init();
 
 async function init() {
   bindNavigation();
-  bindLogin();
   bindOrderActions();
   bindAdminActions();
   await refreshPublicData();
-  await restoreCustomer();
   await restoreAdmin();
+  fillCustomerForm();
   renderAll();
 }
 
@@ -49,18 +47,6 @@ async function refreshPublicData() {
   state.notices = notices.notices;
   document.querySelector("#admin-phone-label").textContent = config.adminPhone;
   document.querySelector("#admin-phone").value = config.adminPhone;
-}
-
-async function restoreCustomer() {
-  if (!state.customerToken) return;
-  try {
-    const data = await api("/api/me", { token: state.customerToken });
-    state.customer = data.customer;
-    fillCustomerForm();
-    await loadMyOrders();
-  } catch {
-    logoutCustomer(false);
-  }
 }
 
 async function restoreAdmin() {
@@ -89,8 +75,7 @@ function bindNavigation() {
 
       if (tab.dataset.view === "account") {
         document.querySelector("#account-view").classList.remove("hidden");
-        if (!state.customer) openLogin();
-        await loadMyOrders();
+        renderMyOrders();
       }
 
       if (tab.dataset.view === "admin") {
@@ -103,43 +88,6 @@ function bindNavigation() {
   });
 }
 
-function bindLogin() {
-  document.querySelector("#customer-login-open").addEventListener("click", openLogin);
-  document.querySelector("#login-close").addEventListener("click", closeLogin);
-  document.querySelector("#customer-logout").addEventListener("click", () => logoutCustomer(true));
-
-  document.querySelector("#otp-request-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const phone = document.querySelector("#otp-phone").value;
-    const result = await api("/api/auth/request-otp", {
-      method: "POST",
-      body: { phone }
-    });
-    toast(result.message);
-    document.querySelector("#otp-request-form").classList.add("hidden");
-    document.querySelector("#otp-verify-form").classList.remove("hidden");
-  });
-
-  document.querySelector("#otp-verify-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const data = await api("/api/auth/verify-otp", {
-      method: "POST",
-      body: {
-        phone: document.querySelector("#otp-phone").value,
-        otp: document.querySelector("#otp-code").value
-      }
-    });
-    state.customer = data.customer;
-    state.customerToken = data.token;
-    localStorage.setItem("ksiraa-customer-token", data.token);
-    fillCustomerForm();
-    closeLogin();
-    renderCustomerStatus();
-    await loadMyOrders();
-    toast("Logged in successfully.");
-  });
-}
-
 function bindOrderActions() {
   document.querySelector("#refresh-products").addEventListener("click", async () => {
     await refreshPublicData();
@@ -147,23 +95,24 @@ function bindOrderActions() {
   });
 
   document.querySelector("#place-order").addEventListener("click", async () => {
-    if (!state.customer) {
-      openLogin();
-      return;
-    }
-
     const payload = orderPayload();
     if (!payload) return;
 
     const result = await api("/api/orders", {
       method: "POST",
-      token: state.customerToken,
       body: payload
     });
     state.cart = {};
     saveCart();
+    state.customerProfile = {
+      name: result.order.customerName,
+      phone: result.order.customerPhone,
+      address: result.order.address
+    };
+    localStorage.setItem("ksiraa-customer-profile", JSON.stringify(state.customerProfile));
+    state.myOrders = [result.order, ...state.myOrders].slice(0, 20);
+    localStorage.setItem("ksiraa-my-orders", JSON.stringify(state.myOrders));
     fillCustomerForm(result.order);
-    await loadMyOrders();
     await loadAdminDashboard({ silent: true });
     renderAll();
     if (result.order.paymentUrl) {
@@ -302,7 +251,6 @@ function renderAll() {
   renderNotices();
   renderProducts();
   renderSummary();
-  renderCustomerStatus();
   renderAdmin();
   renderMyOrders();
 }
@@ -365,23 +313,10 @@ function renderSummary() {
   els.orderTotal.textContent = money(total);
 }
 
-function renderCustomerStatus() {
-  if (!state.customer) {
-    els.customerStatus.innerHTML = `<button class="small-action" type="button" id="inline-login">Login to save orders</button>`;
-    document.querySelector("#inline-login").addEventListener("click", openLogin);
-    return;
-  }
-  els.customerStatus.innerHTML = `<strong>${escapeHtml(state.customer.name || "Logged in")}</strong><span>${escapeHtml(state.customer.phone)}</span>`;
-}
-
 function renderMyOrders() {
-  if (!state.customer) {
-    els.myOrders.innerHTML = `<div class="empty-state">Login with mobile number to see your saved orders.</div>`;
-    return;
-  }
   const orders = state.myOrders || [];
   if (!orders.length) {
-    els.myOrders.innerHTML = `<div class="empty-state">No orders yet.</div>`;
+    els.myOrders.innerHTML = `<div class="empty-state">No orders yet on this device.</div>`;
     return;
   }
   els.myOrders.innerHTML = orders.map(orderCard).join("");
@@ -524,17 +459,6 @@ function buildWhatsAppOrder(payload) {
   ].join("\n");
 }
 
-async function loadMyOrders() {
-  if (!state.customerToken) return;
-  try {
-    const result = await api("/api/my-orders", { token: state.customerToken });
-    state.myOrders = result.orders;
-    renderMyOrders();
-  } catch {
-    state.myOrders = [];
-  }
-}
-
 async function loadAdminDashboard(options = {}) {
   if (!state.adminToken) return;
   try {
@@ -551,31 +475,10 @@ async function loadAdminDashboard(options = {}) {
 }
 
 function fillCustomerForm(order) {
-  const customer = state.customer || {};
-  document.querySelector("#customer-name").value = order?.customerName || customer.name || "";
-  document.querySelector("#customer-phone").value = order?.customerPhone || customer.phone || "";
-  document.querySelector("#customer-address").value = order?.address || customer.address || "";
-}
-
-function openLogin() {
-  document.querySelector("#login-modal").classList.remove("hidden");
-  document.querySelector("#otp-request-form").classList.remove("hidden");
-  document.querySelector("#otp-verify-form").classList.add("hidden");
-  document.querySelector("#otp-phone").value = document.querySelector("#customer-phone").value || "";
-}
-
-function closeLogin() {
-  document.querySelector("#login-modal").classList.add("hidden");
-}
-
-function logoutCustomer(showMessage) {
-  state.customer = null;
-  state.customerToken = "";
-  state.myOrders = [];
-  localStorage.removeItem("ksiraa-customer-token");
-  renderCustomerStatus();
-  renderMyOrders();
-  if (showMessage) toast("Logged out.");
+  const profile = state.customerProfile || {};
+  document.querySelector("#customer-name").value = order?.customerName || profile.name || "";
+  document.querySelector("#customer-phone").value = order?.customerPhone || profile.phone || "";
+  document.querySelector("#customer-address").value = order?.address || profile.address || "";
 }
 
 function logoutAdmin(showMessage) {

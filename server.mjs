@@ -10,7 +10,7 @@ loadEnvFile(join(root, ".env"));
 const { pool, query, one, initSchema } = await import("./db.mjs");
 
 const port = Number(process.env.PORT || 4173);
-const host = process.env.HOST || "127.0.0.1";
+const host = process.env.HOST || (process.env.PORT ? "0.0.0.0" : "127.0.0.1");
 const adminPhone = process.env.ADMIN_PHONE || "9999999999";
 const adminPassword = process.env.ADMIN_PASSWORD || "ksiraa2468";
 const ownerWhatsApp = process.env.OWNER_WHATSAPP || "919999999999";
@@ -204,78 +204,24 @@ async function handleApi(request, response) {
     return;
   }
 
-  if (route === "POST /api/auth/request-otp") {
+  if (route === "POST /api/orders") {
     const body = await readJson(request);
     const phone = cleanPhone(body.phone);
-    if (!phone) return json(response, 400, { error: "Enter a valid mobile number." });
-
-    const otp = process.env.NODE_ENV === "production" ? randomDigits(6) : "123456";
-    await query("DELETE FROM otps WHERE phone = ? OR expires_at <= NOW()", [phone]);
-    await query(
-      "INSERT INTO otps (phone, otp_hash, expires_at) VALUES (?, ?, FROM_UNIXTIME(? / 1000))",
-      [phone, hashToken(otp), Date.now() + otpTtlMs]
-    );
-
-    await sendSms(phone, `Your KSiraa login OTP is ${otp}.`);
-    json(response, 200, {
-      ok: true,
-      message: process.env.NODE_ENV === "production" ? "OTP sent." : "Demo OTP is 123456."
-    });
-    return;
-  }
-
-  if (route === "POST /api/auth/verify-otp") {
-    const body = await readJson(request);
-    const phone = cleanPhone(body.phone);
-    const otp = String(body.otp || "").trim();
-    const record = await one("SELECT phone, otp_hash, expires_at FROM otps WHERE phone = ?", [phone]);
-    if (!record || new Date(record.expires_at).getTime() < Date.now() || !verifyToken(otp, record.otp_hash)) {
-      return json(response, 401, { error: "Incorrect or expired OTP." });
-    }
+    if (!phone) throw httpError(400, "Enter a valid mobile number.");
+    const name = cleanText(body.name, 80);
+    const address = cleanText(body.address, 300);
+    if (!name || !address) throw httpError(400, "Name and delivery address are required.");
 
     let customer = await one("SELECT * FROM customers WHERE phone = ?", [phone]);
     if (!customer) {
       const newId = id("cust");
-      await query("INSERT INTO customers (id, phone, name, address) VALUES (?, ?, '', '')", [newId, phone]);
+      await query("INSERT INTO customers (id, phone, name, address) VALUES (?, ?, ?, ?)", [newId, phone, name, address]);
       customer = await one("SELECT * FROM customers WHERE id = ?", [newId]);
+    } else {
+      await query("UPDATE customers SET name = ?, address = ? WHERE id = ?", [name, address, customer.id]);
     }
 
-    await query("DELETE FROM otps WHERE phone = ?", [phone]);
-    const session = createSession("customer", customer.id);
-    await insertSession(session);
-    json(response, 200, { customer: customerRowToApi(customer), token: session.token });
-    return;
-  }
-
-  if (route === "GET /api/me") {
-    const session = await requireSession(request, "customer");
-    const customer = await one("SELECT * FROM customers WHERE id = ?", [session.user_id]);
-    json(response, 200, { customer: customer ? customerRowToApi(customer) : null });
-    return;
-  }
-
-  if (route === "PATCH /api/me") {
-    const session = await requireSession(request, "customer");
-    const body = await readJson(request);
-    const name = cleanText(body.name, 80);
-    const address = cleanText(body.address, 300);
-    await query("UPDATE customers SET name = ?, address = ? WHERE id = ?", [name, address, session.user_id]);
-    const customer = await one("SELECT * FROM customers WHERE id = ?", [session.user_id]);
-    json(response, 200, { customer: customerRowToApi(customer) });
-    return;
-  }
-
-  if (route === "GET /api/my-orders") {
-    const session = await requireSession(request, "customer");
-    const rows = await query("SELECT * FROM orders WHERE customer_id = ? ORDER BY created_at DESC", [session.user_id]);
-    json(response, 200, { orders: rows.map(orderRowToApi) });
-    return;
-  }
-
-  if (route === "POST /api/orders") {
-    const session = await requireSession(request, "customer");
-    const body = await readJson(request);
-    const order = await buildOrder(session.user_id, body);
+    const order = await buildOrder(customer.id, body);
     if (order.paymentMethod === "Online payment") {
       if (!process.env.PAYMENT_PROVIDER_URL) {
         throw httpError(400, "Online payment is not configured yet. Please choose cash or UPI on delivery.");
