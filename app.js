@@ -86,6 +86,22 @@ function bindNavigation() {
       window.scrollTo({ top: 0, behavior: "smooth" });
     });
   });
+
+  const brandHome = document.querySelector("#brand-home");
+  if (brandHome) {
+    brandHome.addEventListener("click", (event) => {
+      event.preventDefault();
+      document.querySelector('.tab[data-view="shop"]')?.click();
+    });
+  }
+
+  document.querySelectorAll('a[href="#products-view"]').forEach((link) => {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      document.querySelector('.tab[data-view="shop"]')?.classList.add("active");
+      document.querySelector("#products-view")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
 }
 
 function bindOrderActions() {
