@@ -3,7 +3,7 @@ const state = {
   products: [],
   cart: JSON.parse(localStorage.getItem("ksiraa-cart") || "{}"),
   notices: [],
-  myOrders: JSON.parse(localStorage.getItem("ksiraa-my-orders") || "[]"),
+  myOrders: [],
   customerProfile: JSON.parse(localStorage.getItem("ksiraa-customer-profile") || "null"),
   adminToken: localStorage.getItem("ksiraa-admin-token") || "",
   admin: {
@@ -75,7 +75,7 @@ function bindNavigation() {
 
       if (tab.dataset.view === "account") {
         document.querySelector("#account-view").classList.remove("hidden");
-        renderMyOrders();
+        await loadMyOrders({ silent: true });
       }
 
       if (tab.dataset.view === "admin") {
@@ -94,6 +94,7 @@ function bindOrderActions() {
     renderAll();
   });
 
+
   document.querySelector("#place-order").addEventListener("click", async () => {
     const payload = orderPayload();
     if (!payload) return;
@@ -110,9 +111,8 @@ function bindOrderActions() {
       address: result.order.address
     };
     localStorage.setItem("ksiraa-customer-profile", JSON.stringify(state.customerProfile));
-    state.myOrders = [result.order, ...state.myOrders].slice(0, 20);
-    localStorage.setItem("ksiraa-my-orders", JSON.stringify(state.myOrders));
     fillCustomerForm(result.order);
+    await loadMyOrders({ silent: true });
     await loadAdminDashboard({ silent: true });
     renderAll();
     if (result.order.paymentUrl) {
@@ -316,7 +316,7 @@ function renderSummary() {
 function renderMyOrders() {
   const orders = state.myOrders || [];
   if (!orders.length) {
-    els.myOrders.innerHTML = `<div class="empty-state">No orders yet on this device.</div>`;
+    els.myOrders.innerHTML = `<div class="empty-state">No orders yet.</div>`;
     return;
   }
   els.myOrders.innerHTML = orders.map(orderCard).join("");
@@ -457,6 +457,18 @@ function buildWhatsAppOrder(payload) {
     "",
     `Total: ${money(total)}`
   ].join("\n");
+}
+
+async function loadMyOrders(options = {}) {
+  try {
+    const result = await api("/api/orders");
+    state.myOrders = result.orders || [];
+    renderMyOrders();
+  } catch (error) {
+    state.myOrders = [];
+    renderMyOrders();
+    if (!options.silent) toast(error.message);
+  }
 }
 
 async function loadAdminDashboard(options = {}) {

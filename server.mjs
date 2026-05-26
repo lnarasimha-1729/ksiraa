@@ -204,6 +204,14 @@ async function handleApi(request, response) {
     return;
   }
 
+  if (route === "GET /api/orders") {
+    const rows = await query(
+      "SELECT * FROM orders ORDER BY created_at DESC LIMIT 100"
+    );
+    json(response, 200, { orders: rows.map(orderRowToApi) });
+    return;
+  }
+
   if (route === "POST /api/orders") {
     const body = await readJson(request);
     const phone = cleanPhone(body.phone);
