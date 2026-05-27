@@ -45,8 +45,8 @@ async function refreshPublicData() {
   state.config = config;
   state.products = products.products;
   state.notices = notices.notices;
-  document.querySelector("#admin-phone-label").textContent = config.adminPhone;
-  document.querySelector("#admin-phone").value = config.adminPhone;
+  const adminPhoneInput = document.querySelector("#admin-phone");
+  if (adminPhoneInput) adminPhoneInput.value = config.adminPhone;
 }
 
 async function restoreAdmin() {
