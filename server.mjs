@@ -331,6 +331,14 @@ async function handleApi(request, response) {
     return;
   }
 
+  if (request.method === "DELETE" && url.pathname.startsWith("/api/admin/orders/")) {
+    await requireSession(request, "admin");
+    const existing = await findOrder(url.pathname);
+    await query("DELETE FROM orders WHERE id = ?", [existing.id]);
+    json(response, 200, { ok: true });
+    return;
+  }
+
   if (route === "POST /api/admin/notices") {
     await requireSession(request, "admin");
     const body = await readJson(request);
@@ -394,7 +402,7 @@ async function buildOrder(customerId, body) {
   await query("UPDATE customers SET name = ?, address = ? WHERE id = ?", [name, address, customer.id]);
 
   return {
-    id: id("order"),
+    id: await nextOrderId(),
     customerId,
     customerName: name,
     customerPhone: customer.phone,
@@ -518,6 +526,17 @@ function httpError(status, message) {
 
 function id(prefix) {
   return `${prefix}_${Date.now().toString(36)}_${randomBytes(4).toString("hex")}`;
+}
+
+async function nextOrderId() {
+  const year = new Date().getFullYear();
+  const prefix = `KS-${year}-D`;
+  const row = await one(
+    "SELECT MAX(CAST(SUBSTRING(id, ?) AS UNSIGNED)) AS maxNum FROM orders WHERE id LIKE ?",
+    [prefix.length + 1, `${prefix}%`]
+  );
+  const next = Number(row?.maxNum || 0) + 1;
+  return `${prefix}${next}`;
 }
 
 function randomDigits(length) {

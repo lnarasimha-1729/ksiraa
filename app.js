@@ -235,6 +235,19 @@ function bindAdminActions() {
     renderAdmin();
   });
 
+  els.adminOrders.addEventListener("click", async (event) => {
+    const button = event.target.closest('button[data-action="delete-order"]');
+    if (!button) return;
+    if (!confirm("Delete this order? This cannot be undone.")) return;
+    await api(`/api/admin/orders/${encodeURIComponent(button.dataset.orderId)}`, {
+      method: "DELETE",
+      token: state.adminToken
+    });
+    await loadAdminDashboard();
+    renderAdmin();
+    toast("Order deleted.");
+  });
+
   document.querySelector("#broadcast-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     await api("/api/admin/notices", {
@@ -381,17 +394,28 @@ function renderAdminOrders() {
         <strong>${escapeHtml(order.customerName)} | ${escapeHtml(order.customerPhone)}</strong>
         <p>${escapeHtml(order.address)}</p>
         <p>${escapeHtml(order.frequency)} | ${escapeHtml(order.deliveryTime)} | ${escapeHtml(order.paymentMethod || "Cash on delivery")} | ${money(order.total)}</p>
+        <p>Placed: ${escapeHtml(formatOrderDate(order.createdAt))}</p>
         <p>Payment: ${escapeHtml(order.paymentStatus || "Pending")}</p>
         <ul>${order.items.map((item) => `<li>${escapeHtml(item.name)} x ${item.qty}</li>`).join("")}</ul>
       </div>
-      <label>
-        Status
-        <select data-order-id="${order.id}">
-          ${["Received", "Preparing", "Out for delivery", "Delivered", "Paused", "Cancelled"].map((status) => `<option ${order.status === status ? "selected" : ""}>${status}</option>`).join("")}
-        </select>
-      </label>
+      <div class="order-controls">
+        <label>
+          Status
+          <select data-order-id="${order.id}">
+            ${["Received", "Preparing", "Out for delivery", "Delivered", "Paused", "Cancelled"].map((status) => `<option ${order.status === status ? "selected" : ""}>${status}</option>`).join("")}
+          </select>
+        </label>
+        <button class="mini-button danger" data-action="delete-order" data-order-id="${order.id}" type="button">Delete order</button>
+      </div>
     </article>
   `).join("");
+}
+
+function formatOrderDate(value) {
+  if (!value) return "Unknown";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  return date.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
 }
 
 function renderAdminCustomers() {
