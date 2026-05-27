@@ -530,13 +530,9 @@ function id(prefix) {
 
 async function nextOrderId() {
   const year = new Date().getFullYear();
-  const prefix = `KS-${year}-D`;
-  const row = await one(
-    "SELECT MAX(CAST(SUBSTRING(id, ?) AS UNSIGNED)) AS maxNum FROM orders WHERE id LIKE ?",
-    [prefix.length + 1, `${prefix}%`]
-  );
-  const next = Number(row?.maxNum || 0) + 1;
-  return `${prefix}${next}`;
+  const row = await one("SELECT COUNT(*) AS total FROM orders");
+  const next = Number(row?.total || 0) + 1;
+  return `KS-${year}-D${next}`;
 }
 
 function randomDigits(length) {
