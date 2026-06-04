@@ -339,6 +339,16 @@ async function handleApi(request, response) {
     return;
   }
 
+  if (request.method === "DELETE" && url.pathname.startsWith("/api/admin/customers/")) {
+    await requireSession(request, "admin");
+    const customerId = decodeURIComponent(url.pathname.split("/").pop() || "");
+    const existing = await one("SELECT * FROM customers WHERE id = ?", [customerId]);
+    if (!existing) return json(response, 404, { error: "Customer not found." });
+    await query("DELETE FROM customers WHERE id = ?", [existing.id]);
+    json(response, 200, { ok: true });
+    return;
+  }
+
   if (route === "POST /api/admin/notices") {
     await requireSession(request, "admin");
     const body = await readJson(request);
@@ -351,6 +361,16 @@ async function handleApi(request, response) {
     const notice = noticeRowToApi(row);
     await sendWhatsAppBroadcast(notice);
     json(response, 201, { notice });
+    return;
+  }
+
+  if (request.method === "DELETE" && url.pathname.startsWith("/api/admin/notices/")) {
+    await requireSession(request, "admin");
+    const noticeId = decodeURIComponent(url.pathname.split("/").pop() || "");
+    const existing = await one("SELECT * FROM notices WHERE id = ?", [noticeId]);
+    if (!existing) return json(response, 404, { error: "Update not found." });
+    await query("DELETE FROM notices WHERE id = ?", [existing.id]);
+    json(response, 200, { ok: true });
     return;
   }
 

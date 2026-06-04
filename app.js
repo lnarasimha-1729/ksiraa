@@ -21,6 +21,7 @@ const els = {
   adminProducts: document.querySelector("#admin-products"),
   adminOrders: document.querySelector("#admin-orders"),
   adminCustomers: document.querySelector("#admin-customers"),
+  adminNotices: document.querySelector("#admin-notices"),
   myOrders: document.querySelector("#my-orders")
 };
 
@@ -60,9 +61,9 @@ async function restoreAdmin() {
 }
 
 function bindNavigation() {
-  document.querySelectorAll(".tab").forEach((tab) => {
+  document.querySelectorAll(".tab[data-view]").forEach((tab) => {
     tab.addEventListener("click", async () => {
-      document.querySelectorAll(".tab").forEach((item) => item.classList.remove("active"));
+      document.querySelectorAll(".tab[data-view]").forEach((item) => item.classList.remove("active"));
       tab.classList.add("active");
       document.querySelectorAll(".view-section").forEach((section) => section.classList.add("hidden"));
       document.querySelector(".notice-band").classList.add("hidden");
@@ -146,6 +147,16 @@ function bindOrderActions() {
 }
 
 function bindAdminActions() {
+  document.querySelectorAll("[data-admin-tab]").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const target = tab.dataset.adminTab;
+      document.querySelectorAll("[data-admin-tab]").forEach((item) => item.classList.toggle("active", item === tab));
+      document.querySelectorAll("[data-admin-panel]").forEach((panel) => {
+        panel.classList.toggle("hidden", panel.dataset.adminPanel !== target);
+      });
+    });
+  });
+
   document.querySelector("#admin-login").addEventListener("submit", async (event) => {
     event.preventDefault();
     const result = await api("/api/admin/login", {
@@ -210,6 +221,21 @@ function bindAdminActions() {
       toast(`${product.name} price updated.`);
     }
 
+    if (button.dataset.action === "size") {
+      const input = els.adminProducts.querySelector(`[data-size-input="${cssEscape(product.id)}"]`);
+      const size = String(input?.value || "").trim();
+      if (!size) {
+        toast("Enter a weight.");
+        return;
+      }
+      await api(`/api/admin/products/${encodeURIComponent(product.id)}`, {
+        method: "PATCH",
+        token: state.adminToken,
+        body: { size }
+      });
+      toast(`${product.name} weight updated.`);
+    }
+
     if (button.dataset.action === "delete") {
       if (!confirm(`Delete ${product.name}?`)) return;
       await api(`/api/admin/products/${encodeURIComponent(product.id)}`, {
@@ -246,6 +272,33 @@ function bindAdminActions() {
     await loadAdminDashboard();
     renderAdmin();
     toast("Order deleted.");
+  });
+
+  els.adminCustomers.addEventListener("click", async (event) => {
+    const button = event.target.closest('button[data-action="delete-customer"]');
+    if (!button) return;
+    if (!confirm("Delete this customer? Their past orders will remain.")) return;
+    await api(`/api/admin/customers/${encodeURIComponent(button.dataset.customerId)}`, {
+      method: "DELETE",
+      token: state.adminToken
+    });
+    await loadAdminDashboard();
+    renderAdmin();
+    toast("Customer deleted.");
+  });
+
+  els.adminNotices?.addEventListener("click", async (event) => {
+    const button = event.target.closest('button[data-action="delete-notice"]');
+    if (!button) return;
+    if (!confirm("Delete this update?")) return;
+    await api(`/api/admin/notices/${encodeURIComponent(button.dataset.noticeId)}`, {
+      method: "DELETE",
+      token: state.adminToken
+    });
+    await refreshPublicData();
+    await loadAdminDashboard();
+    renderAll();
+    toast("Update deleted.");
   });
 
   document.querySelector("#broadcast-form").addEventListener("submit", async (event) => {
@@ -355,6 +408,26 @@ function renderAdmin() {
   renderAdminProducts();
   renderAdminOrders();
   renderAdminCustomers();
+  renderAdminNotices();
+}
+
+function renderAdminNotices() {
+  if (!els.adminNotices) return;
+  const notices = state.notices || [];
+  if (!notices.length) {
+    els.adminNotices.innerHTML = `<div class="empty-state">No updates sent yet.</div>`;
+    return;
+  }
+  els.adminNotices.innerHTML = notices.map((notice) => `
+    <div class="notice-row">
+      <div>
+        <strong>${escapeHtml(notice.title)}</strong>
+        <p>${escapeHtml(notice.message)}</p>
+        <span class="notice-date">${escapeHtml(formatOrderDate(notice.createdAt))}</span>
+      </div>
+      <button class="mini-button danger" data-action="delete-notice" data-notice-id="${notice.id}" type="button">Delete</button>
+    </div>
+  `).join("");
 }
 
 function renderAdminProducts() {
@@ -363,17 +436,27 @@ function renderAdminProducts() {
     const row = document.createElement("div");
     row.className = "admin-product";
     row.innerHTML = `
-      <div>
+      <div class="admin-product-head">
         <strong>${escapeHtml(product.name)}</strong>
-        <p>${escapeHtml(product.size)} | ${money(product.price)}</p>
         <span class="status-pill ${product.soldOut ? "sold" : "available"}">${product.soldOut ? "Sold out" : "Available"}</span>
       </div>
-      <div class="admin-actions">
-        <label class="price-edit">
-          Price
-          <input data-price-input="${product.id}" inputmode="numeric" value="${product.price}" aria-label="Price for ${escapeHtml(product.name)}">
+      <div class="admin-product-fields">
+        <label class="field">
+          <span>Price</span>
+          <div class="field-row">
+            <input data-price-input="${product.id}" inputmode="numeric" value="${product.price}" aria-label="Price for ${escapeHtml(product.name)}">
+            <button class="mini-button" data-action="price" data-id="${product.id}" type="button">Save</button>
+          </div>
         </label>
-        <button class="mini-button" data-action="price" data-id="${product.id}" type="button">Save price</button>
+        <label class="field">
+          <span>Weight</span>
+          <div class="field-row">
+            <input data-size-input="${product.id}" value="${escapeHtml(product.size)}" aria-label="Weight for ${escapeHtml(product.name)}" placeholder="e.g. 500 g">
+            <button class="mini-button" data-action="size" data-id="${product.id}" type="button">Save</button>
+          </div>
+        </label>
+      </div>
+      <div class="admin-product-buttons">
         <button class="mini-button" data-action="toggle" data-id="${product.id}" type="button">${product.soldOut ? "Mark available" : "Mark sold out"}</button>
         <button class="mini-button danger" data-action="delete" data-id="${product.id}" type="button">Delete</button>
       </div>
@@ -426,9 +509,12 @@ function renderAdminCustomers() {
   }
   els.adminCustomers.innerHTML = customers.map((customer) => `
     <div class="customer-row">
-      <strong>${escapeHtml(customer.name || "Customer")}</strong>
-      <span>${escapeHtml(customer.phone)}</span>
-      <p>${escapeHtml(customer.address || "No address saved")}</p>
+      <div>
+        <strong>${escapeHtml(customer.name || "Customer")}</strong>
+        <span>${escapeHtml(customer.phone)}</span>
+        <p>${escapeHtml(customer.address || "No address saved")}</p>
+      </div>
+      <button class="mini-button danger" data-action="delete-customer" data-customer-id="${customer.id}" type="button">Delete</button>
     </div>
   `).join("");
 }

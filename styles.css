@@ -358,8 +358,7 @@ h3 {
 }
 
 .product-footer,
-.summary-total,
-.admin-product {
+.summary-total {
   align-items: center;
   display: flex;
   justify-content: space-between;
@@ -486,15 +485,36 @@ textarea {
   margin-top: 14px;
 }
 
+.admin-subtabs {
+  display: flex;
+  justify-content: flex-start;
+  margin: 4px 0 18px;
+}
+
+.admin-subtabs .tabs {
+  display: inline-flex;
+}
+
+.admin-tab-panel {
+  display: block;
+}
+
 .admin-grid {
   align-items: start;
   display: grid;
-  gap: 18px;
-  grid-template-columns: 320px minmax(0, 1fr) 360px;
+  gap: 28px;
+  grid-auto-rows: min-content;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 8px;
 }
 
 .admin-card {
-  padding: 18px;
+  align-self: start;
+  padding: 22px;
+}
+
+.admin-card-full {
+  grid-column: 1 / -1;
 }
 
 .wide-card {
@@ -503,39 +523,86 @@ textarea {
 
 .admin-products {
   display: grid;
-  gap: 10px;
+  gap: 14px;
 }
 
 .admin-product {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.admin-product-head {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.admin-product-head strong {
+  font-size: 1rem;
+}
+
+.admin-product-head .status-pill {
+  margin-top: 0;
+}
+
+.admin-product-fields {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.field {
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  font-size: 0.78rem;
+  gap: 4px;
+}
+
+.field input {
+  background: var(--milk);
   border: 1px solid var(--line);
   border-radius: 8px;
-  gap: 12px;
-  padding: 12px;
+  color: var(--ink);
+  font-size: 0.92rem;
+  min-height: 38px;
+  padding: 8px 10px;
+  width: 100%;
 }
 
-.admin-product p {
-  color: var(--muted);
-  margin: 4px 0 0;
+.field input:focus {
+  border-color: var(--gold);
+  outline: none;
 }
 
-.admin-actions {
-  align-items: end;
+.field-row {
+  display: flex;
+  gap: 8px;
+}
+
+.field-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.field-row .mini-button {
+  flex: 0 0 auto;
+}
+
+.admin-product-buttons {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  justify-content: end;
 }
 
-.price-edit {
-  color: var(--muted);
-  font-size: 0.76rem;
-  gap: 3px;
-  min-width: 92px;
-}
-
-.price-edit input {
-  min-height: 36px;
-  padding: 7px 9px;
+.admin-product-buttons .mini-button {
+  flex: 1 1 auto;
+  min-width: 110px;
 }
 
 .mini-button {
@@ -585,6 +652,64 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 14px;
+}
+
+.customer-row {
+  align-items: start;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.customer-row > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.notices-divider {
+  border-top: 1px solid var(--line);
+  margin: 18px 0 14px;
+}
+
+.notices-heading {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin: 0 0 12px;
+  text-transform: uppercase;
+}
+
+.notices-list {
+  display: grid;
+  gap: 10px;
+}
+
+.notice-row {
+  align-items: start;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
+.notice-row > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.notice-row p {
+  color: var(--muted);
+  line-height: 1.4;
+  margin: 4px 0 6px;
+}
+
+.notice-date {
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 .order-card {
@@ -688,7 +813,8 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .wide-card {
+  .wide-card,
+  .admin-card-full {
     grid-column: auto;
   }
 
@@ -732,16 +858,11 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .admin-product {
-    align-items: stretch;
-    flex-direction: column;
+  .admin-product-fields {
+    grid-template-columns: 1fr;
   }
 
   .order-card {
     grid-template-columns: 1fr;
-  }
-
-  .admin-actions {
-    justify-content: start;
   }
 }

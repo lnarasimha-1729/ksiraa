@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0b0a08">
     <title>KSiraa Orders</title>
     <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="styles.css?v=7">
+    <link rel="stylesheet" href="styles.css?v=16">
   </head>
   <body>
     <div class="app-shell">
@@ -20,7 +20,6 @@
         </a>
         <nav class="tabs" aria-label="Primary">
           <button class="tab active" data-view="shop" type="button">Order</button>
-          <button class="tab" data-view="account" type="button">My orders</button>
           <button class="tab" data-view="admin" type="button">Admin</button>
         </nav>
       </header>
@@ -144,57 +143,80 @@
             <button class="primary-action full" type="submit">Login</button>
           </form>
 
-          <div class="admin-grid hidden" id="admin-content">
-            <form class="admin-card" id="product-form">
-              <h3>Add product</h3>
-              <label>
-                Product name
-                <input id="new-product-name" required placeholder="Paneer">
-              </label>
-              <label>
-                Pack size
-                <input id="new-product-size" required placeholder="250 g">
-              </label>
-              <label>
-                Price
-                <input id="new-product-price" required inputmode="numeric" placeholder="180">
-              </label>
-              <label>
-                Description
-                <textarea id="new-product-description" rows="3" placeholder="Freshly made today"></textarea>
-              </label>
-              <button class="primary-action full" type="submit">Add product</button>
-            </form>
-
-            <div class="admin-card">
-              <h3>Product status</h3>
-              <div class="admin-products" id="admin-products"></div>
-            </div>
-
-            <form class="admin-card broadcast-card" id="broadcast-form">
-              <h3>Send update</h3>
-              <label>
-                Message title
-                <input id="broadcast-title" required placeholder="Fresh paneer available">
-              </label>
-              <label>
-                Message
-                <textarea id="broadcast-message" required rows="5" placeholder="Tell customers about new products, offers, or delivery updates."></textarea>
-              </label>
-              <div class="panel-actions">
-                <button class="primary-action full" type="submit">Publish update</button>
-                <button class="secondary-action full" id="broadcast-whatsapp" type="button">Open WhatsApp</button>
+          <div class="hidden" id="admin-content">
+            <div class="admin-subtabs">
+              <div class="tabs" role="tablist">
+                <button class="tab active" data-admin-tab="orders" type="button">Orders</button>
+                <button class="tab" data-admin-tab="products" type="button">Products</button>
+                <button class="tab" data-admin-tab="customers" type="button">Customers</button>
               </div>
-            </form>
-
-            <div class="admin-card wide-card">
-              <h3>Orders</h3>
-              <div class="orders-list" id="admin-orders"></div>
             </div>
 
-            <div class="admin-card">
-              <h3>Customers</h3>
-              <div class="customers-list" id="admin-customers"></div>
+            <div class="admin-tab-panel" data-admin-panel="orders">
+              <div class="admin-card admin-card-full">
+                <h3>Orders</h3>
+                <div class="orders-list" id="admin-orders"></div>
+              </div>
+            </div>
+
+            <div class="admin-tab-panel hidden" data-admin-panel="products">
+              <div class="admin-grid">
+                <div class="admin-card">
+                  <h3>Product status</h3>
+                  <div class="admin-products" id="admin-products"></div>
+                </div>
+
+                <form class="admin-card" id="product-form">
+                  <h3>Add product</h3>
+                  <label>
+                    Product name
+                    <input id="new-product-name" required placeholder="Paneer">
+                  </label>
+                  <label>
+                    Pack size
+                    <input id="new-product-size" required placeholder="250 g">
+                  </label>
+                  <label>
+                    Price
+                    <input id="new-product-price" required inputmode="numeric" placeholder="180">
+                  </label>
+                  <label>
+                    Description
+                    <textarea id="new-product-description" rows="3" placeholder="Freshly made today"></textarea>
+                  </label>
+                  <button class="primary-action full" type="submit">Add product</button>
+                </form>
+              </div>
+            </div>
+
+            <div class="admin-tab-panel hidden" data-admin-panel="customers">
+              <div class="admin-grid">
+                <div class="admin-card">
+                  <h3>Customers</h3>
+                  <div class="customers-list" id="admin-customers"></div>
+                </div>
+
+                <div class="admin-card broadcast-card">
+                  <form id="broadcast-form">
+                    <h3>Send update</h3>
+                    <label>
+                      Message title
+                      <input id="broadcast-title" required placeholder="Fresh paneer available">
+                    </label>
+                    <label>
+                      Message
+                      <textarea id="broadcast-message" required rows="5" placeholder="Tell customers about new products, offers, or delivery updates."></textarea>
+                    </label>
+                    <div class="panel-actions">
+                      <button class="primary-action full" type="submit">Publish update</button>
+                      <button class="secondary-action full" id="broadcast-whatsapp" type="button">Open WhatsApp</button>
+                    </div>
+                  </form>
+                  <div class="notices-divider"></div>
+                  <h4 class="notices-heading">Past updates</h4>
+                  <div class="notices-list" id="admin-notices"></div>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -223,6 +245,6 @@
       </article>
     </template>
 
-    <script src="app.js?v=7"></script>
+    <script src="app.js?v=16"></script>
   </body>
 </html>
