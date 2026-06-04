@@ -823,6 +823,51 @@ textarea {
   width: 100%;
 }
 
+.order-success-panel {
+  text-align: center;
+}
+
+.spinner {
+  animation: spin 0.9s linear infinite;
+  border: 3px solid var(--line);
+  border-radius: 50%;
+  border-top-color: var(--gold);
+  height: 36px;
+  margin: 0 auto 12px;
+  width: 36px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.order-success-image {
+  border-radius: 50%;
+  display: block;
+  height: 92px;
+  margin: 6px auto 14px;
+  object-fit: cover;
+  width: 92px;
+}
+
+.order-success-panel h2 {
+  color: var(--ink);
+  font-size: 1.35rem;
+  margin: 0 0 6px;
+}
+
+.order-success-id {
+  color: var(--gold-dark);
+  font-weight: 700;
+  margin: 0 0 10px;
+}
+
+.order-success-message {
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
 .modal-close {
   background: var(--soft);
   border: 1px solid var(--line);

@@ -23,7 +23,10 @@ const els = {
   adminOrders: document.querySelector("#admin-orders"),
   adminCustomers: document.querySelector("#admin-customers"),
   adminNotices: document.querySelector("#admin-notices"),
-  myOrders: document.querySelector("#my-orders")
+  myOrders: document.querySelector("#my-orders"),
+  orderSuccessModal: document.querySelector("#order-success-modal"),
+  orderSuccessId: document.querySelector("#order-success-id"),
+  orderSuccessClose: document.querySelector("#order-success-close")
 };
 
 init();
@@ -32,10 +35,24 @@ async function init() {
   bindNavigation();
   bindOrderActions();
   bindAdminActions();
+  bindOrderSuccessModal();
   await refreshPublicData();
   await restoreAdmin();
   fillCustomerForm();
   renderAll();
+}
+
+function bindOrderSuccessModal() {
+  if (!els.orderSuccessModal) return;
+  els.orderSuccessClose?.addEventListener("click", hideOrderSuccess);
+  els.orderSuccessModal.addEventListener("click", (event) => {
+    if (event.target === els.orderSuccessModal) hideOrderSuccess();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !els.orderSuccessModal.classList.contains("hidden")) {
+      hideOrderSuccess();
+    }
+  });
 }
 
 async function refreshPublicData() {
@@ -113,30 +130,41 @@ function bindOrderActions() {
   });
 
 
-  document.querySelector("#place-order").addEventListener("click", async () => {
+  document.querySelector("#place-order").addEventListener("click", async (event) => {
     const payload = orderPayload();
     if (!payload) return;
 
-    const result = await api("/api/orders", {
-      method: "POST",
-      body: payload
-    });
-    state.cart = {};
-    saveCart();
-    state.customerProfile = {
-      name: result.order.customerName,
-      phone: result.order.customerPhone,
-      address: result.order.address
-    };
-    localStorage.setItem("ksiraa-customer-profile", JSON.stringify(state.customerProfile));
-    fillCustomerForm(result.order);
-    await loadMyOrders({ silent: true });
-    await loadAdminDashboard({ silent: true });
-    renderAll();
-    if (result.order.paymentUrl) {
-      window.open(result.order.paymentUrl, "_blank");
+    const button = event.currentTarget;
+    button.disabled = true;
+    showOrderProcessing();
+    try {
+      const result = await api("/api/orders", {
+        method: "POST",
+        body: payload
+      });
+      state.cart = {};
+      saveCart();
+      state.customerProfile = {
+        name: result.order.customerName,
+        phone: result.order.customerPhone,
+        address: result.order.address
+      };
+      localStorage.setItem("ksiraa-customer-profile", JSON.stringify(state.customerProfile));
+      fillCustomerForm(result.order);
+      renderProducts();
+      renderSummary();
+      if (result.order.paymentUrl) {
+        window.open(result.order.paymentUrl, "_blank");
+      }
+      showOrderSuccess();
+      loadMyOrders({ silent: true }).catch(() => {});
+      loadAdminDashboard({ silent: true }).catch(() => {});
+    } catch (error) {
+      hideOrderSuccess();
+      toast(error.message || "Could not place the order.");
+    } finally {
+      button.disabled = false;
     }
-    toast(`Order ${result.order.id} placed.`);
   });
 
   document.querySelector("#send-whatsapp").addEventListener("click", () => {
@@ -738,6 +766,37 @@ function money(value) {
 
 function toast(message) {
   alert(message);
+}
+
+function showOrderProcessing() {
+  if (!els.orderSuccessModal) return;
+  const panel = els.orderSuccessModal.querySelector(".order-success-panel");
+  panel?.setAttribute("data-state", "processing");
+  panel?.querySelector(".order-success-processing")?.classList.remove("hidden");
+  panel?.querySelector(".order-success-done")?.classList.add("hidden");
+  els.orderSuccessClose?.classList.add("hidden");
+  els.orderSuccessModal.classList.remove("hidden");
+  els.orderSuccessModal.setAttribute("aria-hidden", "false");
+}
+
+function showOrderSuccess() {
+  if (!els.orderSuccessModal) {
+    toast("Order placed.");
+    return;
+  }
+  const panel = els.orderSuccessModal.querySelector(".order-success-panel");
+  panel?.setAttribute("data-state", "done");
+  panel?.querySelector(".order-success-processing")?.classList.add("hidden");
+  panel?.querySelector(".order-success-done")?.classList.remove("hidden");
+  els.orderSuccessClose?.classList.remove("hidden");
+  els.orderSuccessModal.classList.remove("hidden");
+  els.orderSuccessModal.setAttribute("aria-hidden", "false");
+}
+
+function hideOrderSuccess() {
+  if (!els.orderSuccessModal) return;
+  els.orderSuccessModal.classList.add("hidden");
+  els.orderSuccessModal.setAttribute("aria-hidden", "true");
 }
 
 function escapeHtml(value) {

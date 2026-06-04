@@ -248,8 +248,10 @@ async function handleApi(request, response) {
       ]
     );
     const saved = await one("SELECT * FROM orders WHERE id = ?", [order.id]);
-    await sendWhatsApp(await getOwnerWhatsApp(), orderToOwnerMessage(orderRowToApi(saved)));
     json(response, 201, { order: orderRowToApi(saved) });
+    getOwnerWhatsApp()
+      .then((number) => sendWhatsApp(number, orderToOwnerMessage(orderRowToApi(saved))))
+      .catch((err) => console.error("WhatsApp notify failed:", err));
     return;
   }
 
@@ -575,9 +577,13 @@ function id(prefix) {
 
 async function nextOrderId() {
   const year = new Date().getFullYear();
-  const row = await one("SELECT COUNT(*) AS total FROM orders");
-  const next = Number(row?.total || 0) + 1;
-  return `KS-${year}-D${next}`;
+  const prefix = `KS-${year}-D`;
+  const row = await one(
+    "SELECT MAX(CAST(SUBSTRING(id, ?) AS UNSIGNED)) AS maxNum FROM orders WHERE id LIKE ?",
+    [prefix.length + 1, `${prefix}%`]
+  );
+  const next = Number(row?.maxNum || 0) + 1;
+  return `${prefix}${next}`;
 }
 
 function randomDigits(length) {

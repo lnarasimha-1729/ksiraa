@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0b0a08">
     <title>KSiraa Orders</title>
     <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="styles.css?v=18">
+    <link rel="stylesheet" href="styles.css?v=20">
   </head>
   <body>
     <div class="app-shell">
@@ -221,6 +221,23 @@
           </div>
         </section>
       </main>
+
+      <div class="modal hidden" id="order-success-modal" role="dialog" aria-labelledby="order-success-title" aria-hidden="true">
+        <div class="modal-panel order-success-panel" data-state="processing">
+          <button class="modal-close hidden" id="order-success-close" type="button" aria-label="Close">&times;</button>
+          <img class="order-success-image" src="assets/ksiraa-logo.png" alt="KSiraa">
+          <div class="order-success-processing">
+            <div class="spinner" aria-hidden="true"></div>
+            <h2>Processing your order</h2>
+            <p class="order-success-message">Hold on a moment while we save your order.</p>
+          </div>
+          <div class="order-success-done hidden">
+            <h2 id="order-success-title">Order placed!</h2>
+            <p class="order-success-message">Thank you. We will be in touch shortly to confirm your delivery.</p>
+          </div>
+        </div>
+      </div>
+
       <footer class="site-footer">
         <a href="privacy.html">Privacy Policy</a>
         <a href="terms.html">Terms</a>
@@ -245,6 +262,6 @@
       </article>
     </template>
 
-    <script src="app.js?v=17"></script>
+    <script src="app.js?v=22"></script>
   </body>
 </html>
