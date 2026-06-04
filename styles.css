@@ -666,6 +666,52 @@ textarea {
   min-width: 0;
 }
 
+.customer-row-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.customer-row-actions .mini-button {
+  font-size: 0.78rem;
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.customer-edit-actions .mini-button {
+  font-size: 0.78rem;
+  min-height: 30px;
+  padding: 0 12px;
+}
+
+.customer-row-editing {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.customer-edit-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.customer-edit-fields textarea {
+  background: var(--milk);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  font: inherit;
+  min-height: 60px;
+  padding: 8px 10px;
+  resize: vertical;
+  width: 100%;
+}
+
+.customer-edit-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .notices-divider {
   border-top: 1px solid var(--line);
   margin: 18px 0 14px;

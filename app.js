@@ -8,7 +8,8 @@ const state = {
   adminToken: localStorage.getItem("ksiraa-admin-token") || "",
   admin: {
     orders: [],
-    customers: []
+    customers: [],
+    editingCustomerId: null
   }
 };
 
@@ -275,16 +276,54 @@ function bindAdminActions() {
   });
 
   els.adminCustomers.addEventListener("click", async (event) => {
-    const button = event.target.closest('button[data-action="delete-customer"]');
+    const button = event.target.closest("button[data-action]");
     if (!button) return;
-    if (!confirm("Delete this customer? Their past orders will remain.")) return;
-    await api(`/api/admin/customers/${encodeURIComponent(button.dataset.customerId)}`, {
-      method: "DELETE",
-      token: state.adminToken
-    });
-    await loadAdminDashboard();
-    renderAdmin();
-    toast("Customer deleted.");
+    const customerId = button.dataset.customerId;
+    const action = button.dataset.action;
+
+    if (action === "edit-customer") {
+      state.admin.editingCustomerId = customerId;
+      renderAdminCustomers();
+      return;
+    }
+
+    if (action === "cancel-customer") {
+      state.admin.editingCustomerId = null;
+      renderAdminCustomers();
+      return;
+    }
+
+    if (action === "save-customer") {
+      const root = els.adminCustomers;
+      const name = root.querySelector(`[data-customer-field="name"][data-customer-id="${cssEscape(customerId)}"]`)?.value || "";
+      const phone = root.querySelector(`[data-customer-field="phone"][data-customer-id="${cssEscape(customerId)}"]`)?.value || "";
+      const address = root.querySelector(`[data-customer-field="address"][data-customer-id="${cssEscape(customerId)}"]`)?.value || "";
+      if (!name.trim() || !phone.trim() || !address.trim()) {
+        toast("Name, phone, and address are required.");
+        return;
+      }
+      await api(`/api/admin/customers/${encodeURIComponent(customerId)}`, {
+        method: "PATCH",
+        token: state.adminToken,
+        body: { name, phone, address }
+      });
+      state.admin.editingCustomerId = null;
+      await loadAdminDashboard();
+      renderAdmin();
+      toast("Customer updated.");
+      return;
+    }
+
+    if (action === "delete-customer") {
+      if (!confirm("Delete this customer? Their past orders will remain.")) return;
+      await api(`/api/admin/customers/${encodeURIComponent(customerId)}`, {
+        method: "DELETE",
+        token: state.adminToken
+      });
+      await loadAdminDashboard();
+      renderAdmin();
+      toast("Customer deleted.");
+    }
   });
 
   els.adminNotices?.addEventListener("click", async (event) => {
@@ -507,16 +546,45 @@ function renderAdminCustomers() {
     els.adminCustomers.innerHTML = `<div class="empty-state">No customers yet.</div>`;
     return;
   }
-  els.adminCustomers.innerHTML = customers.map((customer) => `
-    <div class="customer-row">
-      <div>
-        <strong>${escapeHtml(customer.name || "Customer")}</strong>
-        <span>${escapeHtml(customer.phone)}</span>
-        <p>${escapeHtml(customer.address || "No address saved")}</p>
+  els.adminCustomers.innerHTML = customers.map((customer) => {
+    if (state.admin.editingCustomerId === customer.id) {
+      return `
+        <div class="customer-row customer-row-editing">
+          <div class="customer-edit-fields">
+            <label class="field">
+              <span>Name</span>
+              <input data-customer-field="name" data-customer-id="${customer.id}" value="${escapeHtml(customer.name || "")}" placeholder="Customer name">
+            </label>
+            <label class="field">
+              <span>Phone</span>
+              <input data-customer-field="phone" data-customer-id="${customer.id}" inputmode="tel" value="${escapeHtml(customer.phone || "")}" placeholder="10 digit mobile">
+            </label>
+            <label class="field">
+              <span>Address</span>
+              <textarea data-customer-field="address" data-customer-id="${customer.id}" rows="2" placeholder="House, area, landmark">${escapeHtml(customer.address || "")}</textarea>
+            </label>
+          </div>
+          <div class="customer-edit-actions">
+            <button class="mini-button" data-action="save-customer" data-customer-id="${customer.id}" type="button">Save</button>
+            <button class="mini-button" data-action="cancel-customer" data-customer-id="${customer.id}" type="button">Cancel</button>
+          </div>
+        </div>
+      `;
+    }
+    return `
+      <div class="customer-row">
+        <div>
+          <strong>${escapeHtml(customer.name || "Customer")}</strong>
+          <span>${escapeHtml(customer.phone)}</span>
+          <p>${escapeHtml(customer.address || "No address saved")}</p>
+        </div>
+        <div class="customer-row-actions">
+          <button class="mini-button" data-action="edit-customer" data-customer-id="${customer.id}" type="button">Edit</button>
+          <button class="mini-button danger" data-action="delete-customer" data-customer-id="${customer.id}" type="button">Delete</button>
+        </div>
       </div>
-      <button class="mini-button danger" data-action="delete-customer" data-customer-id="${customer.id}" type="button">Delete</button>
-    </div>
-  `).join("");
+    `;
+  }).join("");
 }
 
 function updateQty(productId, delta) {

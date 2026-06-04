@@ -349,6 +349,31 @@ async function handleApi(request, response) {
     return;
   }
 
+  if (request.method === "PATCH" && url.pathname.startsWith("/api/admin/customers/")) {
+    await requireSession(request, "admin");
+    const customerId = decodeURIComponent(url.pathname.split("/").pop() || "");
+    const existing = await one("SELECT * FROM customers WHERE id = ?", [customerId]);
+    if (!existing) return json(response, 404, { error: "Customer not found." });
+    const body = await readJson(request);
+    const name = cleanText(body.name ?? existing.name, 120);
+    const phone = cleanPhone(body.phone ?? existing.phone);
+    const address = cleanText(body.address ?? existing.address, 300);
+    if (!name || !phone || !address) {
+      return json(response, 400, { error: "Name, phone, and address are required." });
+    }
+    if (phone !== existing.phone) {
+      const clash = await one("SELECT id FROM customers WHERE phone = ? AND id <> ?", [phone, existing.id]);
+      if (clash) return json(response, 409, { error: "Another customer already uses this phone." });
+    }
+    await query(
+      "UPDATE customers SET name = ?, phone = ?, address = ? WHERE id = ?",
+      [name, phone, address, existing.id]
+    );
+    const row = await one("SELECT * FROM customers WHERE id = ?", [existing.id]);
+    json(response, 200, { customer: customerRowToApi(row) });
+    return;
+  }
+
   if (route === "POST /api/admin/notices") {
     await requireSession(request, "admin");
     const body = await readJson(request);
