@@ -9,7 +9,8 @@ const state = {
   admin: {
     orders: [],
     customers: [],
-    editingCustomerId: null
+    editingCustomerId: null,
+    selectedCustomerIds: new Set()
   }
 };
 
@@ -348,9 +349,31 @@ function bindAdminActions() {
         method: "DELETE",
         token: state.adminToken
       });
+      state.admin.selectedCustomerIds.delete(customerId);
       await loadAdminDashboard();
       renderAdmin();
       toast("Customer deleted.");
+    }
+  });
+
+  els.adminCustomers.addEventListener("change", (event) => {
+    const rowCheckbox = event.target.closest("input[data-customer-select]");
+    if (rowCheckbox) {
+      const id = rowCheckbox.dataset.customerSelect;
+      if (rowCheckbox.checked) state.admin.selectedCustomerIds.add(id);
+      else state.admin.selectedCustomerIds.delete(id);
+      renderAdminCustomers();
+      return;
+    }
+    const allCheckbox = event.target.closest("#customer-select-all");
+    if (allCheckbox) {
+      const customers = state.admin.customers || [];
+      if (allCheckbox.checked) {
+        customers.forEach((c) => state.admin.selectedCustomerIds.add(c.id));
+      } else {
+        state.admin.selectedCustomerIds.clear();
+      }
+      renderAdminCustomers();
     }
   });
 
@@ -392,7 +415,33 @@ function bindAdminActions() {
       toast("Enter a title and message first.");
       return;
     }
-    window.open(`https://wa.me/?text=${encodeURIComponent(`KSiraa update\n\n${title}\n${message}`)}`, "_blank");
+
+    const text = `KSiraa update\n\n${title}\n${message}`;
+    const selectedIds = state.admin.selectedCustomerIds;
+    const customers = state.admin.customers || [];
+    const recipients = customers.filter((c) => selectedIds.has(c.id));
+
+    if (!recipients.length) {
+      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+      return;
+    }
+
+    let opened = 0;
+    let blocked = 0;
+    recipients.forEach((customer, index) => {
+      const phone = String(customer.phone || "").replace(/\D/g, "");
+      if (!phone) return;
+      const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+      setTimeout(() => {
+        const win = window.open(url, "_blank");
+        if (win) opened++;
+        else blocked++;
+        if (index === recipients.length - 1) {
+          if (blocked > 0) toast(`Opened ${opened}, ${blocked} blocked by browser. Allow popups and click again.`);
+          else toast(`Opened WhatsApp for ${opened} customer${opened === 1 ? "" : "s"}.`);
+        }
+      }, index * 350);
+    });
   });
 }
 
@@ -572,9 +621,28 @@ function renderAdminCustomers() {
   const customers = state.admin.customers || [];
   if (!customers.length) {
     els.adminCustomers.innerHTML = `<div class="empty-state">No customers yet.</div>`;
+    updateBroadcastSelectedCount();
     return;
   }
-  els.adminCustomers.innerHTML = customers.map((customer) => {
+
+  const validIds = new Set(customers.map((c) => c.id));
+  for (const id of Array.from(state.admin.selectedCustomerIds)) {
+    if (!validIds.has(id)) state.admin.selectedCustomerIds.delete(id);
+  }
+  const allSelected = customers.every((c) => state.admin.selectedCustomerIds.has(c.id));
+  const someSelected = state.admin.selectedCustomerIds.size > 0;
+
+  const header = `
+    <div class="customer-select-bar">
+      <label class="customer-select-all">
+        <input type="checkbox" id="customer-select-all" ${allSelected ? "checked" : ""} ${someSelected && !allSelected ? "data-indeterminate=\"true\"" : ""}>
+        <span>${allSelected ? "Deselect all" : "Select all"}</span>
+      </label>
+      <span class="customer-select-count">${state.admin.selectedCustomerIds.size} of ${customers.length} selected</span>
+    </div>
+  `;
+
+  const rows = customers.map((customer) => {
     if (state.admin.editingCustomerId === customer.id) {
       return `
         <div class="customer-row customer-row-editing">
@@ -599,8 +667,12 @@ function renderAdminCustomers() {
         </div>
       `;
     }
+    const isSelected = state.admin.selectedCustomerIds.has(customer.id);
     return `
-      <div class="customer-row">
+      <div class="customer-row${isSelected ? " customer-row-selected" : ""}">
+        <label class="customer-select" aria-label="Select ${escapeHtml(customer.name || customer.phone)}">
+          <input type="checkbox" data-customer-select="${customer.id}" ${isSelected ? "checked" : ""}>
+        </label>
         <div>
           <strong>${escapeHtml(customer.name || "Customer")}</strong>
           <span>${escapeHtml(customer.phone)}</span>
@@ -613,6 +685,24 @@ function renderAdminCustomers() {
       </div>
     `;
   }).join("");
+
+  els.adminCustomers.innerHTML = header + rows;
+  const allCheckbox = els.adminCustomers.querySelector("#customer-select-all");
+  if (allCheckbox && someSelected && !allSelected) allCheckbox.indeterminate = true;
+  updateBroadcastSelectedCount();
+}
+
+function updateBroadcastSelectedCount() {
+  const count = state.admin.selectedCustomerIds.size;
+  const node = document.querySelector("#broadcast-selected-count");
+  if (!node) return;
+  if (!count) {
+    node.textContent = "";
+    node.hidden = true;
+  } else {
+    node.textContent = `Sending to ${count} selected customer${count === 1 ? "" : "s"}`;
+    node.hidden = false;
+  }
 }
 
 function updateQty(productId, delta) {
