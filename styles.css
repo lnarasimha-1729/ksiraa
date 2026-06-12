@@ -1024,6 +1024,33 @@ textarea {
   border-color: rgba(200, 155, 60, 0.45);
 }
 
+.customer-search {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.customer-search input {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  flex: 1;
+  font-size: 0.95rem;
+  min-height: 42px;
+  padding: 10px 14px;
+}
+
+.customer-search input:focus {
+  border-color: var(--gold);
+  box-shadow: var(--ring);
+  outline: none;
+}
+
+.customer-search .mini-button {
+  flex: 0 0 auto;
+}
+
 .customer-select-bar {
   align-items: center;
   background: var(--paper-alt);

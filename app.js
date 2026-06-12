@@ -10,7 +10,8 @@ const state = {
     orders: [],
     customers: [],
     editingCustomerId: null,
-    selectedCustomerIds: new Set()
+    selectedCustomerIds: new Set(),
+    customerSearch: ""
   }
 };
 
@@ -368,13 +369,37 @@ function bindAdminActions() {
     const allCheckbox = event.target.closest("#customer-select-all");
     if (allCheckbox) {
       const customers = state.admin.customers || [];
-      if (allCheckbox.checked) {
-        customers.forEach((c) => state.admin.selectedCustomerIds.add(c.id));
+      const query = String(state.admin.customerSearch || "").trim().toLowerCase();
+      const targets = query
+        ? customers.filter((c) => `${c.name || ""} ${c.phone || ""} ${c.address || ""}`.toLowerCase().includes(query))
+        : customers;
+      const everySelected = targets.every((c) => state.admin.selectedCustomerIds.has(c.id));
+      if (everySelected) {
+        targets.forEach((c) => state.admin.selectedCustomerIds.delete(c.id));
       } else {
-        state.admin.selectedCustomerIds.clear();
+        targets.forEach((c) => state.admin.selectedCustomerIds.add(c.id));
       }
       renderAdminCustomers();
     }
+  });
+
+  let customerSearchTimer = null;
+  els.adminCustomers.addEventListener("input", (event) => {
+    const input = event.target.closest("#customer-search-input");
+    if (!input) return;
+    const value = input.value;
+    clearTimeout(customerSearchTimer);
+    customerSearchTimer = setTimeout(() => {
+      state.admin.customerSearch = value;
+      renderAdminCustomers();
+    }, 120);
+  });
+
+  els.adminCustomers.addEventListener("click", (event) => {
+    const clearBtn = event.target.closest("#customer-search-clear");
+    if (!clearBtn) return;
+    state.admin.customerSearch = "";
+    renderAdminCustomers();
   });
 
   els.adminNotices?.addEventListener("click", async (event) => {
@@ -629,20 +654,48 @@ function renderAdminCustomers() {
   for (const id of Array.from(state.admin.selectedCustomerIds)) {
     if (!validIds.has(id)) state.admin.selectedCustomerIds.delete(id);
   }
-  const allSelected = customers.every((c) => state.admin.selectedCustomerIds.has(c.id));
+
+  const query = String(state.admin.customerSearch || "").trim().toLowerCase();
+  const filtered = query
+    ? customers.filter((c) => {
+        const haystack = `${c.name || ""} ${c.phone || ""} ${c.address || ""}`.toLowerCase();
+        return haystack.includes(query);
+      })
+    : customers;
+
+  const filteredAllSelected = filtered.length > 0 && filtered.every((c) => state.admin.selectedCustomerIds.has(c.id));
   const someSelected = state.admin.selectedCustomerIds.size > 0;
+
+  const searchBar = `
+    <div class="customer-search">
+      <input type="search" id="customer-search-input" placeholder="Search by name, phone, or address" value="${escapeHtml(state.admin.customerSearch || "")}" autocomplete="off">
+      ${query ? `<button class="mini-button" id="customer-search-clear" type="button">Clear</button>` : ""}
+    </div>
+  `;
 
   const header = `
     <div class="customer-select-bar">
       <label class="customer-select-all">
-        <input type="checkbox" id="customer-select-all" ${allSelected ? "checked" : ""} ${someSelected && !allSelected ? "data-indeterminate=\"true\"" : ""}>
-        <span>${allSelected ? "Deselect all" : "Select all"}</span>
+        <input type="checkbox" id="customer-select-all" ${filteredAllSelected ? "checked" : ""}>
+        <span>${filteredAllSelected ? "Deselect all" : "Select all"}${query ? " (filtered)" : ""}</span>
       </label>
-      <span class="customer-select-count">${state.admin.selectedCustomerIds.size} of ${customers.length} selected</span>
+      <span class="customer-select-count">${state.admin.selectedCustomerIds.size} of ${customers.length} selected${query ? ` · ${filtered.length} shown` : ""}</span>
     </div>
   `;
 
-  const rows = customers.map((customer) => {
+  if (!filtered.length) {
+    els.adminCustomers.innerHTML = searchBar + header + `<div class="empty-state">No customers match "${escapeHtml(query)}".</div>`;
+    const input = els.adminCustomers.querySelector("#customer-search-input");
+    if (input) {
+      const v = input.value;
+      input.focus();
+      input.setSelectionRange(v.length, v.length);
+    }
+    updateBroadcastSelectedCount();
+    return;
+  }
+
+  const rows = filtered.map((customer) => {
     if (state.admin.editingCustomerId === customer.id) {
       return `
         <div class="customer-row customer-row-editing">
@@ -686,9 +739,15 @@ function renderAdminCustomers() {
     `;
   }).join("");
 
-  els.adminCustomers.innerHTML = header + rows;
+  els.adminCustomers.innerHTML = searchBar + header + rows;
   const allCheckbox = els.adminCustomers.querySelector("#customer-select-all");
-  if (allCheckbox && someSelected && !allSelected) allCheckbox.indeterminate = true;
+  if (allCheckbox && someSelected && !filteredAllSelected) allCheckbox.indeterminate = true;
+  const input = els.adminCustomers.querySelector("#customer-search-input");
+  if (input && query) {
+    const v = input.value;
+    input.focus();
+    input.setSelectionRange(v.length, v.length);
+  }
   updateBroadcastSelectedCount();
 }
 
