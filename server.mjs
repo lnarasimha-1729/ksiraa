@@ -401,6 +401,31 @@ async function handleApi(request, response) {
     return;
   }
 
+  if (route === "POST /api/admin/whatsapp/send") {
+    await requireSession(request, "admin");
+    const body = await readJson(request);
+    const title = cleanText(body.title, 100);
+    const message = cleanText(body.message, 1000);
+    if (!title || !message) return json(response, 400, { error: "Title and message are required." });
+    const customerIds = Array.isArray(body.customerIds) ? body.customerIds : [];
+    if (!customerIds.length) return json(response, 400, { error: "Select at least one customer." });
+
+    const placeholders = customerIds.map(() => "?").join(",");
+    const rows = await query(`SELECT phone FROM customers WHERE id IN (${placeholders})`, customerIds);
+    const phones = rows.map((r) => normalizeWhatsAppPhone(r.phone)).filter(Boolean);
+    if (!phones.length) return json(response, 400, { error: "No valid phone numbers in selection." });
+
+    const text = `KSiraa update\n\n${title}\n${message}`;
+    const result = await sendWhatsAppToPhones(phones, text);
+    json(response, 200, {
+      sent: result.sent,
+      failed: result.failed,
+      demo: Boolean(result.demo),
+      failures: result.details?.failed || []
+    });
+    return;
+  }
+
   json(response, 404, { error: "Not found." });
 }
 
@@ -622,24 +647,96 @@ async function sendSms(phone, message) {
 }
 
 async function sendWhatsApp(phone, message) {
-  if (!process.env.WHATSAPP_API_URL) {
-    console.log(`[WhatsApp demo] ${phone}: ${message}`);
-    return;
+  if (process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN) {
+    const result = await sendCloudApiMessage(phone, message);
+    if (!result.ok) {
+      console.error(`[WhatsApp] send to ${phone} failed:`, result.error);
+    }
+    return result;
   }
-  await postProvider(process.env.WHATSAPP_API_URL, process.env.WHATSAPP_API_TOKEN, { to: phone, message });
+  if (process.env.WHATSAPP_API_URL) {
+    await postProvider(process.env.WHATSAPP_API_URL, process.env.WHATSAPP_API_TOKEN, { to: phone, message });
+    return { ok: true };
+  }
+  console.log(`[WhatsApp demo] ${phone}: ${message}`);
+  return { ok: true, demo: true };
 }
 
 async function sendWhatsAppBroadcast(notice) {
-  if (!process.env.WHATSAPP_API_URL) {
-    console.log(`[WhatsApp broadcast demo] ${notice.title}: ${notice.message}`);
-    return;
-  }
   const message = `KSiraa update\n\n${notice.title}\n${notice.message}`;
+  if (!process.env.WHATSAPP_PHONE_NUMBER_ID && !process.env.WHATSAPP_API_URL) {
+    console.log(`[WhatsApp broadcast demo] ${notice.title}: ${notice.message}`);
+    return { sent: 0, failed: 0, demo: true };
+  }
   const customers = await query("SELECT phone FROM customers");
-  await Promise.allSettled(customers.map((customer) => postProvider(process.env.WHATSAPP_API_URL, process.env.WHATSAPP_API_TOKEN, {
-    to: `91${customer.phone}`,
-    message
-  })));
+  return sendWhatsAppToPhones(customers.map((c) => normalizeWhatsAppPhone(c.phone)), message);
+}
+
+async function sendWhatsAppToPhones(phones, message) {
+  const targets = phones.filter(Boolean);
+  if (process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN) {
+    const results = await Promise.allSettled(targets.map((phone) => sendCloudApiMessage(phone, message)));
+    const sent = [];
+    const failed = [];
+    results.forEach((r, i) => {
+      const phone = targets[i];
+      if (r.status === "fulfilled" && r.value.ok) sent.push({ phone });
+      else {
+        const err = r.status === "fulfilled" ? r.value.error : r.reason?.message;
+        failed.push({ phone, error: err || "Unknown error" });
+      }
+    });
+    return { sent: sent.length, failed: failed.length, details: { sent, failed } };
+  }
+  if (process.env.WHATSAPP_API_URL) {
+    const results = await Promise.allSettled(targets.map((to) => postProvider(process.env.WHATSAPP_API_URL, process.env.WHATSAPP_API_TOKEN, { to, message })));
+    const sent = results.filter((r) => r.status === "fulfilled").length;
+    return { sent, failed: results.length - sent, details: {} };
+  }
+  console.log(`[WhatsApp demo] ${targets.length} recipients: ${message}`);
+  return { sent: targets.length, failed: 0, demo: true };
+}
+
+function normalizeWhatsAppPhone(phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length === 10) return `91${digits}`;
+  if (digits.startsWith("91") && digits.length === 12) return digits;
+  return digits;
+}
+
+async function sendCloudApiMessage(phone, message) {
+  const to = normalizeWhatsAppPhone(phone);
+  if (!to) return { ok: false, error: "Empty phone" };
+  const url = `https://graph.facebook.com/v21.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+  const body = {
+    messaging_product: "whatsapp",
+    to,
+    type: "text",
+    text: { body: message, preview_url: false }
+  };
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`
+      },
+      body: JSON.stringify(body)
+    });
+    const text = await response.text();
+    let data = {};
+    try { data = JSON.parse(text); } catch {}
+    if (!response.ok) {
+      const errMsg = data?.error?.message || text || `HTTP ${response.status}`;
+      const errCode = data?.error?.code;
+      return { ok: false, error: errMsg, code: errCode, status: response.status };
+    }
+    const messageId = data?.messages?.[0]?.id;
+    return { ok: true, messageId };
+  } catch (error) {
+    return { ok: false, error: error.message || "Network error" };
+  }
 }
 
 async function createPayment(order) {

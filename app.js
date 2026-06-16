@@ -433,7 +433,8 @@ function bindAdminActions() {
     toast("Update published.");
   });
 
-  document.querySelector("#broadcast-whatsapp").addEventListener("click", () => {
+  document.querySelector("#broadcast-whatsapp").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
     const title = document.querySelector("#broadcast-title").value.trim();
     const message = document.querySelector("#broadcast-message").value.trim();
     if (!title || !message) {
@@ -441,34 +442,39 @@ function bindAdminActions() {
       return;
     }
 
-    const text = `KSiraa update\n\n${title}\n${message}`;
-    const selectedIds = state.admin.selectedCustomerIds;
-    const customers = state.admin.customers || [];
-    const recipients = customers.filter((c) => selectedIds.has(c.id));
-
-    if (!recipients.length) {
+    const selectedIds = Array.from(state.admin.selectedCustomerIds);
+    if (!selectedIds.length) {
+      const text = `KSiraa update\n\n${title}\n${message}`;
       window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
       return;
     }
 
-    let opened = 0;
-    let blocked = 0;
-    recipients.forEach((customer, index) => {
-      const phone = String(customer.phone || "").replace(/\D/g, "");
-      if (!phone) return;
-      const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
-      setTimeout(() => {
-        const win = window.open(url, "_blank");
-        if (win) opened++;
-        else blocked++;
-        if (index === recipients.length - 1) {
-          if (blocked > 0) toast(`Opened ${opened}, ${blocked} blocked by browser. Allow popups and click again.`);
-          else toast(`Opened WhatsApp for ${opened} customer${opened === 1 ? "" : "s"}.`);
-        }
-      }, index * 350);
-    });
+    button.disabled = true;
+    const originalLabel = button.textContent;
+    button.textContent = `Sending to ${selectedIds.length}…`;
+    try {
+      const result = await api("/api/admin/whatsapp/send", {
+        method: "POST",
+        token: state.adminToken,
+        body: { title, message, customerIds: selectedIds }
+      });
+      if (result.demo) {
+        toast(`Demo mode — ${result.sent} would be sent. Set WHATSAPP_PHONE_NUMBER_ID + WHATSAPP_ACCESS_TOKEN to enable real send.`);
+      } else if (result.failed) {
+        const firstError = result.failures?.[0]?.error || "Unknown";
+        toast(`Sent ${result.sent}, ${result.failed} failed. First error: ${firstError}`);
+      } else {
+        toast(`Sent WhatsApp to ${result.sent} customer${result.sent === 1 ? "" : "s"}.`);
+      }
+    } catch (error) {
+      toast(error.message || "Failed to send WhatsApp.");
+    } finally {
+      button.disabled = false;
+      button.textContent = originalLabel;
+    }
   });
 }
+
 
 function renderAll() {
   renderNotices();
