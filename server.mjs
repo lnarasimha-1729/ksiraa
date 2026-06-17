@@ -192,6 +192,30 @@ async function handleApi(request, response) {
     return;
   }
 
+  if (route === "GET /api/webhooks/whatsapp") {
+    const mode = url.searchParams.get("hub.mode");
+    const token = url.searchParams.get("hub.verify_token");
+    const challenge = url.searchParams.get("hub.challenge");
+    const expected = process.env.WHATSAPP_VERIFY_TOKEN || "ksiraa_verify_token";
+    if (mode === "subscribe" && token === expected) {
+      console.log("[WhatsApp] Webhook verified");
+      response.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      response.end(challenge || "");
+      return;
+    }
+    response.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end("Forbidden");
+    return;
+  }
+
+  if (route === "POST /api/webhooks/whatsapp") {
+    let body = {};
+    try { body = await readJson(request); } catch { body = {}; }
+    json(response, 200, { ok: true });
+    handleWhatsAppWebhook(body).catch((err) => console.error("[WhatsApp] webhook handler error:", err));
+    return;
+  }
+
   if (route === "GET /api/products") {
     const rows = await query("SELECT * FROM products ORDER BY sort_order ASC, created_at ASC");
     json(response, 200, { products: rows.map(productRowToApi) });
@@ -705,16 +729,107 @@ function normalizeWhatsAppPhone(phone) {
   return digits;
 }
 
-async function sendCloudApiMessage(phone, message) {
-  const to = normalizeWhatsAppPhone(phone);
-  if (!to) return { ok: false, error: "Empty phone" };
-  const url = `https://graph.facebook.com/v21.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
-  const body = {
+async function handleWhatsAppWebhook(payload) {
+  const entries = payload?.entry || [];
+  for (const entry of entries) {
+    const changes = entry.changes || [];
+    for (const change of changes) {
+      const value = change.value || {};
+      const messages = value.messages || [];
+      for (const message of messages) {
+        await processIncomingWhatsAppMessage(message, value.contacts || []);
+      }
+    }
+  }
+}
+
+async function processIncomingWhatsAppMessage(message, contacts) {
+  const from = message.from;
+  if (!from) return;
+  const profileName = contacts.find((c) => c.wa_id === from)?.profile?.name || "";
+
+  let userInput = "";
+  if (message.type === "text") {
+    userInput = String(message.text?.body || "").trim();
+  } else if (message.type === "interactive") {
+    const inter = message.interactive || {};
+    userInput = inter.button_reply?.id || inter.list_reply?.id || "";
+  } else if (message.type === "button") {
+    userInput = String(message.button?.payload || message.button?.text || "").trim();
+  } else {
+    userInput = `[${message.type}]`;
+  }
+
+  console.log(`[WhatsApp] ← ${from} (${profileName}): ${userInput}`);
+
+  const intent = String(userInput).toLowerCase();
+
+  if (intent === "show_products" || intent === "browse" || intent === "products" || intent === "menu" || intent === "order" || intent === "order now") {
+    await sendProductList(from);
+    return;
+  }
+
+  if (intent === "my_orders" || intent === "orders") {
+    await sendRecentOrders(from);
+    return;
+  }
+
+  // Default: welcome with buttons
+  await sendWelcomeMessage(from, profileName);
+}
+
+async function sendWelcomeMessage(to, name) {
+  const greeting = name ? `Hello ${name}!` : "Hello!";
+  const body = `${greeting} 👋\n\nWelcome to *KSiraa* — fresh dairy delivered to your door.\n\nWhat would you like to do?`;
+  return cloudApiRequest({
     messaging_product: "whatsapp",
     to,
-    type: "text",
-    text: { body: message, preview_url: false }
-  };
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: body },
+      action: {
+        buttons: [
+          { type: "reply", reply: { id: "show_products", title: "🛒 Order Now" } },
+          { type: "reply", reply: { id: "my_orders", title: "📦 My Orders" } }
+        ]
+      }
+    }
+  });
+}
+
+async function sendProductList(to) {
+  const products = await query("SELECT * FROM products WHERE sold_out = 0 ORDER BY sort_order ASC, created_at ASC LIMIT 10");
+  if (!products.length) {
+    return sendCloudApiMessage(to, "Sorry, no products available right now. Please check back later.");
+  }
+
+  const lines = products.map((p) => `• *${p.name}* (${p.size}) — Rs. ${p.price}`);
+  const text = `🥛 *Today's products*\n\n${lines.join("\n")}\n\nReply with what you'd like, for example:\n_2 ghee, 1 butter_\n\nOr open our website: ${publicBaseUrl}`;
+  return sendCloudApiMessage(to, text);
+}
+
+async function sendRecentOrders(to) {
+  const normalized = normalizeWhatsAppPhone(to);
+  const localPhone = normalized.startsWith("91") ? normalized.slice(2) : normalized;
+  const customer = await one("SELECT * FROM customers WHERE phone = ?", [localPhone]);
+  if (!customer) {
+    return sendCloudApiMessage(to, "We don't have any orders for this number yet. Tap *Order Now* to place your first one.");
+  }
+  const orders = await query("SELECT * FROM orders WHERE customer_id = ? ORDER BY created_at DESC LIMIT 5", [customer.id]);
+  if (!orders.length) {
+    return sendCloudApiMessage(to, "We don't have any orders for this number yet. Tap *Order Now* to place your first one.");
+  }
+  const lines = orders.map((o) => `• ${o.id} — Rs. ${o.total} — ${o.status}`);
+  return sendCloudApiMessage(to, `📦 *Your recent orders*\n\n${lines.join("\n")}`);
+}
+
+async function cloudApiRequest(body) {
+  if (!process.env.WHATSAPP_PHONE_NUMBER_ID || !process.env.WHATSAPP_ACCESS_TOKEN) {
+    console.log("[WhatsApp] Cloud API not configured, skipping send.");
+    return { ok: false, error: "Not configured" };
+  }
+  const url = `https://graph.facebook.com/v21.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -728,15 +843,27 @@ async function sendCloudApiMessage(phone, message) {
     let data = {};
     try { data = JSON.parse(text); } catch {}
     if (!response.ok) {
-      const errMsg = data?.error?.message || text || `HTTP ${response.status}`;
-      const errCode = data?.error?.code;
-      return { ok: false, error: errMsg, code: errCode, status: response.status };
+      const err = data?.error?.message || text || `HTTP ${response.status}`;
+      console.error(`[WhatsApp] → send failed: ${err}`);
+      return { ok: false, error: err };
     }
-    const messageId = data?.messages?.[0]?.id;
-    return { ok: true, messageId };
+    console.log(`[WhatsApp] → sent to ${body.to}`);
+    return { ok: true, messageId: data?.messages?.[0]?.id };
   } catch (error) {
-    return { ok: false, error: error.message || "Network error" };
+    console.error("[WhatsApp] → request error:", error.message);
+    return { ok: false, error: error.message };
   }
+}
+
+async function sendCloudApiMessage(phone, message) {
+  const to = normalizeWhatsAppPhone(phone);
+  if (!to) return { ok: false, error: "Empty phone" };
+  return cloudApiRequest({
+    messaging_product: "whatsapp",
+    to,
+    type: "text",
+    text: { body: message, preview_url: false }
+  });
 }
 
 async function createPayment(order) {
