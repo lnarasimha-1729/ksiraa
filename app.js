@@ -120,7 +120,19 @@ function bindNavigation() {
     link.addEventListener("click", (event) => {
       event.preventDefault();
       document.querySelector('.tab[data-view="shop"]')?.classList.add("active");
-      document.querySelector("#products-view")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const hero = document.querySelector(".hero");
+      const heroImg = hero?.querySelector(".hero-media img") || hero?.querySelector(".hero-media");
+      const topbar = document.querySelector(".topbar");
+      const topbarH = topbar ? topbar.getBoundingClientRect().height : 0;
+      let target;
+      if (heroImg) {
+        const rect = heroImg.getBoundingClientRect();
+        target = rect.bottom + window.scrollY - topbarH - 16;
+      } else {
+        const products = document.querySelector("#products-view");
+        target = products ? products.getBoundingClientRect().top + window.scrollY - topbarH - 16 : 0;
+      }
+      window.scrollTo({ top: target, behavior: "smooth" });
     });
   });
 }
