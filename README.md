@@ -1,160 +1,225 @@
-# KSiraa Orders App
+# KSiraa Orders
 
-This is the KSiraa ordering app production-MVP. It includes customer login, ordering, admin product controls, order management, customer records, announcements, privacy/terms pages, daily database backups, and provider hooks for SMS OTP, WhatsApp Business, and online payments.
+A self-hosted ordering platform for a fresh-dairy brand. Customers place orders from a single-page web app; the owner manages products, orders, customers, and broadcast updates from a built-in admin panel. A WhatsApp bot (via Meta Cloud API) lets customers order without leaving WhatsApp.
 
-## Start Locally
+Single Node process, MySQL backend, no build step, no framework.
+
+---
+
+## What's inside
+
+- **Customer ordering site** — product catalogue, cart, address + payment-method form, order placement, "My orders" view, order success modal.
+- **Admin panel** (`/` → Admin tab) — three sub-tabs:
+  - **Orders** — list, status workflow (Received → Preparing → Out for delivery → Delivered → Paused → Cancelled), delete.
+  - **Products** — add, edit price/weight, mark sold out / available, delete.
+  - **Customers** — search, edit, delete, multi-select + broadcast WhatsApp updates. Compose-and-publish notices that show on the customer site and (optionally) send through WhatsApp.
+- **WhatsApp Cloud API bot** — customer sends `hi` → bot replies with a list of products → user picks items, gives name + address → order is created in the same `orders` table. No website visit required.
+- **Order ID format** — `KS-YYYY-D<n>` (year + sequence), human-readable.
+- **Daily-frequency / one-time / weekly / twice-weekly / monthly** subscription frequencies on each order.
+- **Notice band** — owner publishes short updates that appear at the top of the customer site.
+- **Privacy & Terms pages** included.
+
+---
+
+## Tech
+
+- Node 20+ (uses `node:http`, `node:fs`, native `fetch`)
+- MySQL 8 (via `mysql2`)
+- Plain HTML / CSS / vanilla JS on the frontend (no React, no build step)
+- WhatsApp Cloud API (Meta, free tier 1,000 conversations/month)
+
+No build pipeline. Files in this folder are what the server ships.
+
+---
+
+## Run locally
 
 ```powershell
+# 1. Install dependencies
+npm install
+
+# 2. Copy and fill .env
+cp .env.example .env
+# edit .env with your DB credentials and admin login
+
+# 3. Start the server
 node server.mjs
 ```
 
-Open:
+The server starts on `http://127.0.0.1:4173` by default. Tables are created automatically on first boot.
 
-```text
-http://127.0.0.1:4173
+### Default local credentials
+
+| Role | Phone | Password |
+|---|---|---|
+| Admin | `9999999999` | `ksiraa2468` |
+| OTP for any customer login (dev only) | — | `123456` |
+
+Both can be overridden via `.env`. **Change the admin password before deploying publicly.**
+
+---
+
+## Configuration
+
+All config lives in `.env`. See `.env.example` for the full list. The critical ones:
+
+```env
+# Server
+PORT=4173
+HOST=127.0.0.1
+PUBLIC_BASE_URL=https://orders.example.com
+
+# Admin
+ADMIN_PHONE=9591747474
+ADMIN_PASSWORD=a-strong-password
+OWNER_WHATSAPP=919591747474
+
+# MySQL
+DB_HOST=your-mysql-host
+DB_USER=your-db-user
+DB_PASSWORD=your-db-password
+DB_NAME=your-db-name
+DB_PORT=3306
+
+# WhatsApp Cloud API (Meta)
+WHATSAPP_PHONE_NUMBER_ID=your-phone-number-id
+WHATSAPP_ACCESS_TOKEN=your-permanent-access-token
+WHATSAPP_VERIFY_TOKEN=ksiraa_verify_token
 ```
 
-## Local Login Details
+The server reads `.env` automatically. If a value is missing the app falls back to safe defaults where possible; WhatsApp features are silently skipped (logged as `[WhatsApp demo]`) until credentials are present.
 
-Customer OTP for local testing:
+---
 
-```text
-123456
+## WhatsApp integration
+
+KSiraa ships with two layers of WhatsApp support:
+
+### 1. Outbound (admin → customer)
+
+The admin **Customers** tab has multi-select checkboxes and a search box. Type a broadcast title + message, pick the customers, hit **Send WhatsApp**. The server POSTs to the Meta Cloud API per customer.
+
+**Important Meta rules** (no code can bypass these):
+
+- Free-form text only works within 24 hours of the customer last messaging you.
+- Outside that window, Meta requires a pre-approved message template.
+- Approve one generic template in Meta Business Manager once, then `WHATSAPP_TEMPLATE_NAME` in `.env` enables broadcasts to all customers.
+
+### 2. Inbound (customer → bot)
+
+A webhook receives incoming WhatsApp messages at:
+
+```
+GET  /api/webhooks/whatsapp   (verification)
+POST /api/webhooks/whatsapp   (incoming messages)
 ```
 
-Default admin:
+Configure these in Meta → WhatsApp → Configuration. Use `WHATSAPP_VERIFY_TOKEN` as the verify token.
 
-```text
-Mobile: 9999999999
-Password: ksiraa2468
+The bot supports a full ordering flow inside WhatsApp:
+
+```
+USER:  hi
+BOT:   Welcome! [Order Now] [My Orders]
+USER:  taps Order Now
+BOT:   shows interactive product list (live from DB)
+USER:  picks items, types address
+BOT:   confirms order, writes to the same `orders` table
 ```
 
-Change the admin password before public use.
+Orders placed via the bot show up in the admin Orders tab indistinguishable from website orders.
 
-## Production Environment
+### Local webhook testing
 
-Create a `.env` file from `.env.example`, or set these before hosting:
+Webhooks need a public HTTPS URL. For local development:
 
 ```powershell
-$env:NODE_ENV="production"
-$env:HOST="127.0.0.1"
-$env:PORT="4173"
-$env:PUBLIC_BASE_URL="https://orders.ksiraa.com"
-$env:ADMIN_PHONE="your-admin-mobile"
-$env:ADMIN_PASSWORD="a-strong-password"
-$env:OWNER_WHATSAPP="91yourbusinessnumber"
-$env:BACKUP_RETENTION_DAYS="30"
-node server.mjs
+ngrok http 4173
 ```
 
-The server reads `.env` automatically when the file exists in this folder.
+Use the `https://...ngrok-free.app` URL as the **Callback URL** in Meta. Subscribe to the `messages` field.
 
-## Real SMS OTP
+---
 
-Set:
+## Production deploy
 
-```powershell
-$env:SMS_PROVIDER_URL="https://your-sms-provider/send"
-$env:SMS_PROVIDER_TOKEN="provider-token"
+Most cleanly deployed behind a TLS-terminating reverse proxy (Nginx, Caddy, Cloudflare Tunnel, Hostinger Node app panel, etc.).
+
+1. Upload `server.mjs`, `db.mjs`, `app.js`, `index.html`, `styles.css`, `assets/`, `privacy.html`, `terms.html`, `package.json`.
+2. Set environment variables in the host's panel (do **not** upload `.env`).
+3. Run `npm install` once.
+4. Start with `node server.mjs`.
+5. Point your domain at the server, enable HTTPS.
+6. In Meta, set the webhook to `https://yourdomain.com/api/webhooks/whatsapp`.
+
+### What NOT to upload
+
+- `.env` (secrets go in the host's env-var panel)
+- `node_modules/` (host runs `npm install`)
+- `.git/`
+- `server.err.log` / `server.out.log`
+
+---
+
+## Project structure
+
+```
+.
+├── server.mjs             # HTTP server, all API routes, WhatsApp bot logic
+├── db.mjs                 # MySQL connection + schema initialisation
+├── app.js                 # Frontend SPA logic (vanilla JS)
+├── index.html             # Single-page shell
+├── styles.css             # Dark theme + admin layout
+├── assets/                # Logo + product imagery
+├── privacy.html           # Privacy policy
+├── terms.html             # Terms of service
+├── .env.example           # Documented env-var template
+└── package.json
 ```
 
-The app sends:
+---
 
-```json
-{ "to": "9876543210", "message": "Your KSiraa login OTP is 123456." }
-```
+## Data model (auto-created)
 
-Use your SMS provider dashboard to map this payload if their API expects different field names.
+| Table | Purpose |
+|---|---|
+| `products` | catalogue rows (id, name, size, price, description, sold_out, sort_order) |
+| `customers` | customer profiles keyed by phone |
+| `orders` | every order with items stored as JSON (id like `KS-2026-D7`) |
+| `notices` | broadcast updates |
+| `sessions` | admin / customer session tokens |
+| `otps` | OTP hashes for customer login |
+| `admin` | single-row admin credentials |
+| `whatsapp_sessions` | per-phone bot conversation state |
+| `meta` | misc settings (`ownerWhatsApp` etc.) |
 
-## Real WhatsApp Business
+All tables use InnoDB + utf8mb4. The schema is idempotent — booting the server against an existing DB is safe.
 
-Set:
+---
 
-```powershell
-$env:WHATSAPP_API_URL="https://your-whatsapp-provider/send"
-$env:WHATSAPP_API_TOKEN="provider-token"
-```
+## Security notes
 
-The app sends:
+- Admin passwords are scrypt-hashed.
+- Session tokens are 32-byte random hex.
+- OTP codes are scrypt-hashed before being stored.
+- Customer auth uses phone + OTP; admin auth uses phone + password.
+- **No JS framework, no dependency tree to audit beyond `mysql2`.** Surface area is small by design.
 
-```json
-{ "to": "919876543210", "message": "KSiraa update..." }
-```
+Before going public:
 
-For WhatsApp Business API, promotional broadcasts may require approved templates depending on your provider and WhatsApp rules.
+- [ ] Change `ADMIN_PASSWORD`
+- [ ] Rotate the WhatsApp access token (especially if it's been shared)
+- [ ] Enable HTTPS on your domain
+- [ ] Review `privacy.html` + `terms.html` with a local advisor
 
-## HTTPS Hosting With Domain
+---
 
-Use a domain like:
+## License
 
-```text
-orders.ksiraa.com
-```
+MIT — use it, fork it, modify it. Attribution appreciated but not required.
 
-Recommended deployment shape:
+---
 
-- Run this Node app privately on `127.0.0.1:4173`
-- Put Nginx, Caddy, Cloudflare Tunnel, Render, Railway, or another HTTPS reverse proxy in front
-- Set `PUBLIC_BASE_URL=https://orders.ksiraa.com`
-- Do not expose plain HTTP publicly
+## Acknowledgements
 
-## Daily Database Backup
-
-The app stores data here:
-
-```text
-data/ksiraa-db.json
-```
-
-Automatic backups are written here:
-
-```text
-backups/
-```
-
-Backups run:
-
-- Once when the server starts
-- Every 24 hours while the server is running
-- Old backups are removed after `BACKUP_RETENTION_DAYS`
-
-Copy the `backups/` folder to cloud storage regularly for off-machine safety.
-
-## Privacy Policy And Terms
-
-Included pages:
-
-```text
-privacy.html
-terms.html
-```
-
-They are linked from the app footer. Review them with a local legal/accounting advisor before a public launch.
-
-## Optional Online Payments
-
-Customers can choose:
-
-- Cash on delivery
-- UPI on delivery
-- Online payment
-
-Online payment requires:
-
-```powershell
-$env:PAYMENT_PROVIDER_URL="https://your-payment-provider/create-link"
-$env:PAYMENT_PROVIDER_TOKEN="provider-token"
-$env:PAYMENT_RETURN_URL="https://orders.ksiraa.com/"
-```
-
-The app sends order/payment JSON and expects the provider response to include one of:
-
-```json
-{ "paymentUrl": "https://payment-link" }
-```
-
-or `url` / `short_url`.
-
-## Important
-
-Real launch still requires your provider accounts, tokens, domain DNS, and HTTPS hosting access. Those cannot be completed from code alone.
+Built for KSiraa, a small dairy in Bengaluru.
