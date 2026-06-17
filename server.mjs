@@ -749,11 +749,13 @@ async function processIncomingWhatsAppMessage(message, contacts) {
   const profileName = contacts.find((c) => c.wa_id === from)?.profile?.name || "";
 
   let userInput = "";
+  let listSelectionId = "";
   if (message.type === "text") {
     userInput = String(message.text?.body || "").trim();
   } else if (message.type === "interactive") {
     const inter = message.interactive || {};
     userInput = inter.button_reply?.id || inter.list_reply?.id || "";
+    listSelectionId = inter.list_reply?.id || "";
   } else if (message.type === "button") {
     userInput = String(message.button?.payload || message.button?.text || "").trim();
   } else {
@@ -762,20 +764,350 @@ async function processIncomingWhatsAppMessage(message, contacts) {
 
   console.log(`[WhatsApp] ← ${from} (${profileName}): ${userInput}`);
 
-  const intent = String(userInput).toLowerCase();
+  const session = await loadWaSession(from);
+  const text = String(userInput).toLowerCase().trim();
 
-  if (intent === "show_products" || intent === "browse" || intent === "products" || intent === "menu" || intent === "order" || intent === "order now") {
+  // Global commands work anywhere
+  if (text === "hi" || text === "hello" || text === "hey" || text === "start" || text === "menu") {
+    session.step = "idle";
+    session.cart = {};
+    await saveWaSession(from, session);
+    await sendWelcomeMessage(from, profileName);
+    return;
+  }
+  if (text === "cancel" || text === "stop") {
+    session.step = "idle";
+    session.cart = {};
+    await saveWaSession(from, session);
+    await sendCloudApiMessage(from, "Cancelled. Type *hi* anytime to start again.");
+    return;
+  }
+  if (text === "my_orders" || text === "orders") {
+    await sendRecentOrders(from);
+    return;
+  }
+  if (text === "show_products" || text === "browse" || text === "products" || text === "order" || text === "order now") {
+    session.step = "shopping";
+    if (!session.cart) session.cart = {};
+    await saveWaSession(from, session);
+    await sendProductList(from);
+    return;
+  }
+  if (text === "view_cart" || text === "cart") {
+    await sendCartSummary(from, session);
+    return;
+  }
+  if (text === "checkout" || text === "place_order") {
+    if (!session.cart || !Object.keys(session.cart).length) {
+      await sendCloudApiMessage(from, "Your cart is empty. Type *menu* to see products.");
+      return;
+    }
+    return startCheckout(from, session, profileName);
+  }
+  if (text === "add_more") {
+    session.step = "shopping";
+    await saveWaSession(from, session);
     await sendProductList(from);
     return;
   }
 
-  if (intent === "my_orders" || intent === "orders") {
-    await sendRecentOrders(from);
+  // List-message selection: a product was picked
+  if (listSelectionId && listSelectionId.startsWith("prod_")) {
+    const productId = listSelectionId.slice(5);
+    await handleProductPick(from, session, productId);
     return;
   }
 
-  // Default: welcome with buttons
-  await sendWelcomeMessage(from, profileName);
+  // State-machine flow
+  switch (session.step) {
+    case "shopping":
+      return handleShoppingText(from, session, userInput);
+    case "ask_qty":
+      return handleQtyReply(from, session, userInput);
+    case "ask_name":
+      return handleNameReply(from, session, userInput, profileName);
+    case "ask_address":
+      return handleAddressReply(from, session, userInput);
+    case "confirm":
+      return handleConfirmReply(from, session, userInput);
+    default:
+      // Idle or unknown — show welcome
+      await sendWelcomeMessage(from, profileName);
+  }
+}
+
+async function loadWaSession(phone) {
+  const row = await one("SELECT * FROM whatsapp_sessions WHERE phone = ?", [phone]);
+  if (!row) {
+    return { phone, step: "idle", cart: {}, profile: {} };
+  }
+  let cart = {};
+  let profile = {};
+  try { cart = typeof row.cart_json === "string" ? JSON.parse(row.cart_json) : (row.cart_json || {}); } catch {}
+  try { profile = typeof row.profile_json === "string" ? JSON.parse(row.profile_json) : (row.profile_json || {}); } catch {}
+  return { phone, step: row.step || "idle", cart, profile };
+}
+
+async function saveWaSession(phone, session) {
+  await query(
+    `INSERT INTO whatsapp_sessions (phone, step, cart_json, profile_json)
+     VALUES (?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE step = VALUES(step), cart_json = VALUES(cart_json), profile_json = VALUES(profile_json)`,
+    [phone, session.step || "idle", JSON.stringify(session.cart || {}), JSON.stringify(session.profile || {})]
+  );
+}
+
+async function handleProductPick(from, session, productId) {
+  const product = await one("SELECT * FROM products WHERE id = ? AND sold_out = 0", [productId]);
+  if (!product) {
+    await sendCloudApiMessage(from, "That product isn't available. Type *menu* to see what's in stock.");
+    return;
+  }
+  session.cart = session.cart || {};
+  session.cart[product.id] = (session.cart[product.id] || 0) + 1;
+  session.step = "shopping";
+  await saveWaSession(from, session);
+  await sendCloudApiMessage(from, `Added *${product.name}* to your cart (qty: ${session.cart[product.id]}).\n\nReply *more* to keep shopping, *cart* to view items, or *checkout* to place the order.`);
+}
+
+async function handleShoppingText(from, session, raw) {
+  // Try parsing free-form like "2 ghee, 1 butter"
+  const products = await query("SELECT * FROM products WHERE sold_out = 0");
+  const parsed = parseShoppingText(raw, products);
+  if (!parsed.length) {
+    await sendCloudApiMessage(from, "I didn't catch that. Tap *Browse products* or type something like _2 ghee, 1 butter_. Type *cart* to view your items or *checkout* to confirm.");
+    await sendProductList(from);
+    return;
+  }
+  session.cart = session.cart || {};
+  for (const { product, qty } of parsed) {
+    session.cart[product.id] = (session.cart[product.id] || 0) + qty;
+  }
+  await saveWaSession(from, session);
+  const summary = parsed.map((p) => `+${p.qty} ${p.product.name}`).join("\n");
+  await sendCloudApiMessage(from, `Added to cart:\n${summary}\n\nReply *cart* to view, *more* to add more, or *checkout* to place the order.`);
+}
+
+function parseShoppingText(text, products) {
+  const out = [];
+  if (!text) return out;
+  const lower = String(text).toLowerCase();
+  const parts = lower.split(/[,\n]+/).map((s) => s.trim()).filter(Boolean);
+  for (const part of parts) {
+    const match = part.match(/^(\d+)\s*(.+)$/) || part.match(/^(.+?)\s+(\d+)$/);
+    let qty = 1;
+    let term = part;
+    if (match) {
+      const a = match[1];
+      const b = match[2];
+      if (/^\d+$/.test(a)) { qty = Number(a); term = b; }
+      else { qty = Number(b); term = a; }
+    }
+    if (!Number.isFinite(qty) || qty < 1) qty = 1;
+    qty = Math.min(qty, 99);
+    const product = products.find((p) => p.name.toLowerCase().includes(term)) ||
+                    products.find((p) => term.includes(p.name.toLowerCase().split(/\s+/)[0]));
+    if (product) out.push({ product, qty });
+  }
+  return out;
+}
+
+async function sendCartSummary(to, session) {
+  const cart = session.cart || {};
+  const ids = Object.keys(cart).filter((id) => cart[id] > 0);
+  if (!ids.length) {
+    await sendCloudApiMessage(to, "Your cart is empty. Type *menu* to see products.");
+    return;
+  }
+  const placeholders = ids.map(() => "?").join(",");
+  const products = await query(`SELECT * FROM products WHERE id IN (${placeholders})`, ids);
+  let total = 0;
+  const lines = products.map((p) => {
+    const qty = cart[p.id];
+    const lineTotal = p.price * qty;
+    total += lineTotal;
+    return `• ${p.name} × ${qty} — Rs. ${lineTotal}`;
+  });
+  const body = `🛒 *Your cart*\n\n${lines.join("\n")}\n\n*Total: Rs. ${total}*\n\nReply *checkout* to place the order, *more* to add items, or *cancel* to clear.`;
+  return cloudApiRequest({
+    messaging_product: "whatsapp",
+    to,
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: body },
+      action: {
+        buttons: [
+          { type: "reply", reply: { id: "checkout", title: "✅ Checkout" } },
+          { type: "reply", reply: { id: "add_more", title: "➕ Add more" } },
+          { type: "reply", reply: { id: "cancel", title: "❌ Cancel" } }
+        ]
+      }
+    }
+  });
+}
+
+async function startCheckout(from, session, profileName) {
+  const localPhone = normalizeLocalPhone(from);
+  const existing = await one("SELECT * FROM customers WHERE phone = ?", [localPhone]);
+  if (existing && existing.name && existing.address) {
+    session.profile = { name: existing.name, address: existing.address };
+    session.step = "confirm";
+    await saveWaSession(from, session);
+    await sendOrderConfirmation(from, session, existing);
+    return;
+  }
+  session.step = "ask_name";
+  session.profile = session.profile || {};
+  if (profileName) session.profile.name = profileName;
+  await saveWaSession(from, session);
+  const prompt = profileName
+    ? `What name should we put on the order? Send *${profileName}* to confirm, or type a different name.`
+    : "What name should we put on the order?";
+  await sendCloudApiMessage(from, prompt);
+}
+
+async function handleNameReply(from, session, raw) {
+  const name = String(raw || "").trim();
+  if (!name || name.length < 2) {
+    await sendCloudApiMessage(from, "Please send a name (2 or more letters).");
+    return;
+  }
+  session.profile = session.profile || {};
+  session.profile.name = name.slice(0, 80);
+  session.step = "ask_address";
+  await saveWaSession(from, session);
+  await sendCloudApiMessage(from, `Thanks ${session.profile.name}!\n\nPlease send your *full delivery address* — house no, street, area, and pincode.`);
+}
+
+async function handleAddressReply(from, session, raw) {
+  const address = String(raw || "").trim();
+  if (address.length < 8) {
+    await sendCloudApiMessage(from, "That address looks too short. Please send the full address with house no, street, area, and pincode.");
+    return;
+  }
+  session.profile = session.profile || {};
+  session.profile.address = address.slice(0, 300);
+  session.step = "confirm";
+  await saveWaSession(from, session);
+
+  const localPhone = normalizeLocalPhone(from);
+  let customer = await one("SELECT * FROM customers WHERE phone = ?", [localPhone]);
+  if (!customer) {
+    const newId = id("cust");
+    await query("INSERT INTO customers (id, phone, name, address) VALUES (?, ?, ?, ?)", [newId, localPhone, session.profile.name, session.profile.address]);
+    customer = await one("SELECT * FROM customers WHERE id = ?", [newId]);
+  } else {
+    await query("UPDATE customers SET name = ?, address = ? WHERE id = ?", [session.profile.name, session.profile.address, customer.id]);
+    customer = { ...customer, name: session.profile.name, address: session.profile.address };
+  }
+  await sendOrderConfirmation(from, session, customer);
+}
+
+async function sendOrderConfirmation(to, session, customer) {
+  const cart = session.cart || {};
+  const ids = Object.keys(cart).filter((cid) => cart[cid] > 0);
+  if (!ids.length) {
+    await sendCloudApiMessage(to, "Your cart is empty. Type *menu* to start again.");
+    session.step = "idle";
+    await saveWaSession(to, session);
+    return;
+  }
+  const placeholders = ids.map(() => "?").join(",");
+  const products = await query(`SELECT * FROM products WHERE id IN (${placeholders})`, ids);
+  let total = 0;
+  const lines = products.map((p) => {
+    const qty = cart[p.id];
+    const lineTotal = p.price * qty;
+    total += lineTotal;
+    return `• ${p.name} × ${qty} — Rs. ${lineTotal}`;
+  });
+  const body = `📋 *Confirm your order*\n\n${lines.join("\n")}\n\n*Total: Rs. ${total}*\n\n*Deliver to:* ${customer.name}\n${customer.address}\n\nPayment: Cash on delivery\n\nReply *yes* to confirm, or *cancel* to start over.`;
+  return cloudApiRequest({
+    messaging_product: "whatsapp",
+    to,
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: body },
+      action: {
+        buttons: [
+          { type: "reply", reply: { id: "yes", title: "✅ Confirm order" } },
+          { type: "reply", reply: { id: "cancel", title: "❌ Cancel" } }
+        ]
+      }
+    }
+  });
+}
+
+async function handleConfirmReply(from, session, raw) {
+  const text = String(raw || "").trim().toLowerCase();
+  if (text === "yes" || text === "y" || text === "confirm") {
+    await placeWhatsAppOrder(from, session);
+    return;
+  }
+  await sendCloudApiMessage(from, "Reply *yes* to confirm the order, or *cancel* to start over.");
+}
+
+async function placeWhatsAppOrder(from, session) {
+  const localPhone = normalizeLocalPhone(from);
+  const customer = await one("SELECT * FROM customers WHERE phone = ?", [localPhone]);
+  if (!customer) {
+    await sendCloudApiMessage(from, "Something went wrong — couldn't find your details. Type *hi* to start again.");
+    session.step = "idle";
+    await saveWaSession(from, session);
+    return;
+  }
+  const cart = session.cart || {};
+  const ids = Object.keys(cart).filter((cid) => cart[cid] > 0);
+  if (!ids.length) {
+    await sendCloudApiMessage(from, "Your cart is empty.");
+    session.step = "idle";
+    await saveWaSession(from, session);
+    return;
+  }
+  const placeholders = ids.map(() => "?").join(",");
+  const products = await query(`SELECT * FROM products WHERE id IN (${placeholders})`, ids);
+  const items = products.map((p) => ({
+    productId: p.id,
+    name: p.name,
+    size: p.size,
+    qty: cart[p.id],
+    price: p.price,
+    lineTotal: p.price * cart[p.id]
+  }));
+  const total = items.reduce((sum, it) => sum + it.lineTotal, 0);
+  const orderId = await nextOrderId();
+  await query(
+    `INSERT INTO orders (id, customer_id, customer_name, customer_phone, address, frequency, delivery_time, payment_method, payment_status, payment_url, status, items_json, total)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      orderId, customer.id, customer.name, customer.phone, customer.address,
+      "One time", "Any time", "Cash on delivery", "Pending", "",
+      "Received", JSON.stringify(items), total
+    ]
+  );
+  session.step = "idle";
+  session.cart = {};
+  await saveWaSession(from, session);
+
+  await sendCloudApiMessage(from, `✅ *Order confirmed!*\n\nOrder ID: *${orderId}*\nTotal: Rs. ${total}\n\nWe'll deliver soon. Type *hi* anytime to order again.`);
+
+  // Notify owner async (same pattern as website orders)
+  getOwnerWhatsApp()
+    .then((number) => sendWhatsApp(number, `New WhatsApp order ${orderId} from ${customer.name} (${customer.phone}). Total Rs. ${total}.`))
+    .catch((err) => console.error("Owner notify failed:", err));
+}
+
+function normalizeLocalPhone(waPhone) {
+  const digits = String(waPhone || "").replace(/\D/g, "");
+  if (digits.startsWith("91") && digits.length === 12) return digits.slice(2);
+  return digits;
+}
+
+async function handleQtyReply(from, session, raw) {
+  // reserved for future use; not currently routed to
+  await handleShoppingText(from, session, raw);
 }
 
 async function sendWelcomeMessage(to, name) {
@@ -804,9 +1136,32 @@ async function sendProductList(to) {
     return sendCloudApiMessage(to, "Sorry, no products available right now. Please check back later.");
   }
 
-  const lines = products.map((p) => `• *${p.name}* (${p.size}) — Rs. ${p.price}`);
-  const text = `🥛 *Today's products*\n\n${lines.join("\n")}\n\nReply with what you'd like, for example:\n_2 ghee, 1 butter_\n\nOr open our website: ${publicBaseUrl}`;
-  return sendCloudApiMessage(to, text);
+  // WhatsApp interactive list — tap a row to add it to the cart
+  const rows = products.slice(0, 10).map((p) => ({
+    id: `prod_${p.id}`,
+    title: truncate(p.name, 24),
+    description: `${p.size} · Rs. ${p.price}`
+  }));
+  return cloudApiRequest({
+    messaging_product: "whatsapp",
+    to,
+    type: "interactive",
+    interactive: {
+      type: "list",
+      header: { type: "text", text: "Today's products" },
+      body: { text: "Tap any item to add it to your cart. You can also type for example _2 ghee, 1 butter_." },
+      footer: { text: "Type *cart* to view, *checkout* to confirm" },
+      action: {
+        button: "View products",
+        sections: [{ title: "Fresh dairy", rows }]
+      }
+    }
+  });
+}
+
+function truncate(s, n) {
+  const str = String(s || "");
+  return str.length > n ? str.slice(0, n - 1) + "…" : str;
 }
 
 async function sendRecentOrders(to) {

@@ -113,4 +113,14 @@ export async function initSchema() {
       password_hash VARCHAR(255) NOT NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS whatsapp_sessions (
+      phone VARCHAR(20) NOT NULL PRIMARY KEY,
+      step VARCHAR(40) NOT NULL DEFAULT 'idle',
+      cart_json JSON NOT NULL,
+      profile_json JSON NOT NULL,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
 }
