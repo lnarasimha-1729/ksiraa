@@ -8,8 +8,8 @@
     <link rel="manifest" href="manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=41">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css?v=60">
   </head>
   <body>
     <div class="app-shell">
@@ -21,8 +21,11 @@
             <small>Fresh dairy orders</small>
           </span>
         </a>
-        <nav class="tabs" aria-label="Primary">
-          <button class="tab active" data-view="shop" type="button">Order</button>
+        <nav class="tabs tabs-center" aria-label="Primary">
+          <a class="tab tab-link" href="index.html">Menu</a>
+          <a class="tab tab-link" href="about.html">About Us</a>
+        </nav>
+        <nav class="tabs" aria-label="Account">
           <button class="tab" data-view="admin" type="button">Admin</button>
         </nav>
       </header>
@@ -54,59 +57,70 @@
           </div>
 
           <aside class="order-panel" aria-label="Order summary">
-            <h2>Your order</h2>
-            <form id="customer-form">
-              <label>
-                Name
-                <input id="customer-name" name="name" autocomplete="name" required placeholder="Customer name">
-              </label>
-              <label>
-                Mobile number
-                <input id="customer-phone" name="phone" inputmode="tel" autocomplete="tel" required placeholder="10 digit mobile">
-              </label>
-              <label>
-                Delivery address
-                <textarea id="customer-address" name="address" rows="3" required placeholder="House, area, landmark"></textarea>
-              </label>
-              <div class="form-row">
-                <label>
-                  Delivery frequency
-                  <select id="repeat-frequency" name="frequency">
-                    <option>Every day</option>
-                    <option selected>Weekly</option>
-                    <option>Twice a week</option>
-                    <option>Monthly</option>
-                    <option>One time</option>
-                  </select>
-                </label>
-                <label>
-                  Payment
-                  <select id="payment-method" name="payment">
-                    <option selected>Cash on delivery</option>
-                    <option>UPI on delivery</option>
-                    <option>Online payment</option>
-                  </select>
-                </label>
-              </div>
-              <div class="form-row">
-                <label>
-                  Preferred time
-                  <select id="delivery-time" name="time">
-                    <option>Morning</option>
-                    <option selected>Evening</option>
-                    <option>Any time</option>
-                  </select>
-                </label>
-              </div>
-            </form>
-            <div class="summary-list" id="summary-list"></div>
-            <div class="summary-total">
-              <span>Total</span>
-              <strong id="order-total">Rs. 0</strong>
+            <div class="order-panel-head">
+              <p class="eyebrow">Checkout</p>
+              <h2>Place your order</h2>
+              <p class="order-panel-sub">Tell us where to deliver and we'll handle the rest.</p>
             </div>
-            <div class="panel-actions">
-              <button class="primary-action full" id="place-order" type="button">Place order</button>
-              <button class="secondary-action full" id="send-whatsapp" type="button">Also send WhatsApp</button>
+
+            <div class="order-panel-grid">
+              <form id="customer-form" class="order-panel-form">
+                <label>
+                  Name
+                  <input id="customer-name" name="name" autocomplete="name" required placeholder="Customer name">
+                </label>
+                <label>
+                  Mobile number
+                  <input id="customer-phone" name="phone" inputmode="tel" autocomplete="tel" required placeholder="10 digit mobile">
+                </label>
+                <label>
+                  Delivery address
+                  <textarea id="customer-address" name="address" rows="3" required placeholder="House, area, landmark"></textarea>
+                </label>
+                <div class="form-row">
+                  <label>
+                    Delivery frequency
+                    <select id="repeat-frequency" name="frequency">
+                      <option>Every day</option>
+                      <option selected>Weekly</option>
+                      <option>Twice a week</option>
+                      <option>Monthly</option>
+                      <option>One time</option>
+                    </select>
+                  </label>
+                  <label>
+                    Payment
+                    <select id="payment-method" name="payment">
+                      <option selected>Cash on delivery</option>
+                      <option>UPI on delivery</option>
+                      <option>Online payment</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label>
+                    Preferred time
+                    <select id="delivery-time" name="time">
+                      <option>Morning</option>
+                      <option selected>Evening</option>
+                      <option>Any time</option>
+                    </select>
+                  </label>
+                </div>
+              </form>
+
+              <div class="order-panel-summary">
+                <p class="eyebrow">Order summary</p>
+                <div class="summary-list" id="summary-list"></div>
+                <div class="summary-total">
+                  <span>Total</span>
+                  <strong id="order-total">Rs. 0</strong>
+                </div>
+                <div class="panel-actions">
+                  <button class="primary-action full" id="place-order" type="button">Place order</button>
+                  <button class="secondary-action full" id="send-whatsapp" type="button">Also send WhatsApp</button>
+                </div>
+              </div>
             </div>
           </aside>
         </section>
@@ -263,6 +277,6 @@
       </article>
     </template>
 
-    <script src="app.js?v=44"></script>
+    <script src="app.js?v=58"></script>
   </body>
 </html>

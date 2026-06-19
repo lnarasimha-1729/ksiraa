@@ -81,6 +81,14 @@ async function restoreAdmin() {
 }
 
 function bindNavigation() {
+  const path = location.pathname.split("/").pop() || "index.html";
+  document.querySelectorAll(".tab.tab-link").forEach((link) => {
+    const href = link.getAttribute("href") || "";
+    if (href === path || (href === "index.html" && (path === "" || path === "index.html"))) {
+      link.classList.add("active");
+    }
+  });
+
   document.querySelectorAll(".tab[data-view]").forEach((tab) => {
     tab.addEventListener("click", async () => {
       document.querySelectorAll(".tab[data-view]").forEach((item) => item.classList.remove("active"));
@@ -111,8 +119,10 @@ function bindNavigation() {
   const brandHome = document.querySelector("#brand-home");
   if (brandHome) {
     brandHome.addEventListener("click", (event) => {
+      const onHome = location.pathname.endsWith("/") || location.pathname.endsWith("index.html");
+      if (!onHome) return;
       event.preventDefault();
-      document.querySelector('.tab[data-view="shop"]')?.click();
+      window.scrollTo({ top: 0, behavior: "smooth" });
     });
   }
 
@@ -785,7 +795,8 @@ function updateBroadcastSelectedCount() {
 function updateQty(productId, delta) {
   const product = state.products.find((item) => item.id === productId);
   if (!product || product.soldOut) return;
-  const next = Math.max(0, (state.cart[productId] || 0) + delta);
+  const prev = state.cart[productId] || 0;
+  const next = Math.max(0, prev + delta);
   if (next === 0) {
     delete state.cart[productId];
   } else {
@@ -794,6 +805,47 @@ function updateQty(productId, delta) {
   saveCart();
   renderProducts();
   renderSummary();
+  if (delta > 0 && prev === 0) {
+    showCartToast(product);
+  }
+}
+
+function showCartToast(product) {
+  const existing = document.querySelector("#cart-toast");
+  if (existing) existing.remove();
+  const toastEl = document.createElement("div");
+  toastEl.id = "cart-toast";
+  toastEl.className = "cart-toast";
+  toastEl.innerHTML = `
+    <div class="cart-toast-body">
+      <strong>${escapeHtml(product.name)} added</strong>
+      <span>Continue shopping or review your order.</span>
+    </div>
+    <button class="cart-toast-cta" type="button">Go to your order →</button>
+  `;
+  document.body.append(toastEl);
+  requestAnimationFrame(() => toastEl.classList.add("cart-toast-in"));
+
+  const dismiss = () => {
+    toastEl.classList.remove("cart-toast-in");
+    setTimeout(() => toastEl.remove(), 280);
+  };
+
+  toastEl.querySelector(".cart-toast-cta").addEventListener("click", () => {
+    const orderPanel = document.querySelector(".order-panel");
+    if (orderPanel) {
+      const topbar = document.querySelector(".topbar");
+      const offset = topbar ? topbar.getBoundingClientRect().height : 0;
+      const top = orderPanel.getBoundingClientRect().top + window.scrollY - offset - 16;
+      window.scrollTo({ top, behavior: "smooth" });
+      const nameInput = document.querySelector("#customer-name");
+      setTimeout(() => nameInput?.focus({ preventScroll: true }), 600);
+    }
+    dismiss();
+  });
+
+  clearTimeout(showCartToast._timer);
+  showCartToast._timer = setTimeout(dismiss, 4200);
 }
 
 function orderPayload() {
