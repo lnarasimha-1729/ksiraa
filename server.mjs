@@ -769,10 +769,12 @@ async function processIncomingWhatsAppMessage(message, contacts) {
 
   // Global commands work anywhere
   if (text === "hi" || text === "hello" || text === "hey" || text === "start" || text === "menu") {
-    session.step = "idle";
+    session.step = "shopping";
     session.cart = {};
     await saveWaSession(from, session);
-    await sendWelcomeMessage(from, profileName);
+    const greeting = profileName ? `Hi ${profileName}! 👋` : "Hi! 👋";
+    await sendCloudApiMessage(from, `${greeting}\n\nWelcome to *KSiraa* — fresh dairy delivered to your door.\n\nHere's what's available today:`);
+    await sendProductList(from);
     return;
   }
   if (text === "cancel" || text === "stop") {
@@ -826,8 +828,16 @@ async function processIncomingWhatsAppMessage(message, contacts) {
       return handleQtyReply(from, session, userInput);
     case "ask_name":
       return handleNameReply(from, session, userInput, profileName);
-    case "ask_address":
-      return handleAddressReply(from, session, userInput);
+    case "ask_house":
+      return handleHouseReply(from, session, userInput);
+    case "ask_street":
+      return handleStreetReply(from, session, userInput);
+    case "ask_city":
+      return handleCityReply(from, session, userInput);
+    case "ask_pincode":
+      return handlePincodeReply(from, session, userInput);
+    case "ask_payment":
+      return handlePaymentReply(from, session, userInput);
     case "confirm":
       return handleConfirmReply(from, session, userInput);
     default:
@@ -952,9 +962,9 @@ async function startCheckout(from, session, profileName) {
   const existing = await one("SELECT * FROM customers WHERE phone = ?", [localPhone]);
   if (existing && existing.name && existing.address) {
     session.profile = { name: existing.name, address: existing.address };
-    session.step = "confirm";
+    session.step = "ask_payment";
     await saveWaSession(from, session);
-    await sendOrderConfirmation(from, session, existing);
+    await sendPaymentChoice(from);
     return;
   }
   session.step = "ask_name";
@@ -975,21 +985,60 @@ async function handleNameReply(from, session, raw) {
   }
   session.profile = session.profile || {};
   session.profile.name = name.slice(0, 80);
-  session.step = "ask_address";
+  session.step = "ask_house";
   await saveWaSession(from, session);
-  await sendCloudApiMessage(from, `Thanks ${session.profile.name}!\n\nPlease send your *full delivery address* — house no, street, area, and pincode.`);
+  await sendCloudApiMessage(from, `Thanks ${session.profile.name}!\n\n🏠 *Step 1 of 4*\nFlat / House no. / Building name?\n\n_e.g. 12B, Sunrise Apartments_`);
 }
 
-async function handleAddressReply(from, session, raw) {
-  const address = String(raw || "").trim();
-  if (address.length < 8) {
-    await sendCloudApiMessage(from, "That address looks too short. Please send the full address with house no, street, area, and pincode.");
+async function handleHouseReply(from, session, raw) {
+  const value = String(raw || "").trim();
+  if (value.length < 2) {
+    await sendCloudApiMessage(from, "Please send your house no or building name (2 or more characters).");
     return;
   }
   session.profile = session.profile || {};
-  session.profile.address = address.slice(0, 300);
-  session.step = "confirm";
+  session.profile.addrHouse = value.slice(0, 100);
+  session.step = "ask_street";
   await saveWaSession(from, session);
+  await sendCloudApiMessage(from, "🛣️ *Step 2 of 4*\nStreet / Area / Locality?\n\n_e.g. MG Road, Indiranagar_");
+}
+
+async function handleStreetReply(from, session, raw) {
+  const value = String(raw || "").trim();
+  if (value.length < 2) {
+    await sendCloudApiMessage(from, "Please send your street or area name.");
+    return;
+  }
+  session.profile = session.profile || {};
+  session.profile.addrStreet = value.slice(0, 120);
+  session.step = "ask_city";
+  await saveWaSession(from, session);
+  await sendCloudApiMessage(from, "🏙️ *Step 3 of 4*\nCity?\n\n_e.g. Bengaluru_");
+}
+
+async function handleCityReply(from, session, raw) {
+  const value = String(raw || "").trim();
+  if (value.length < 2) {
+    await sendCloudApiMessage(from, "Please send your city name.");
+    return;
+  }
+  session.profile = session.profile || {};
+  session.profile.addrCity = value.slice(0, 60);
+  session.step = "ask_pincode";
+  await saveWaSession(from, session);
+  await sendCloudApiMessage(from, "📮 *Step 4 of 4*\n6-digit pincode?\n\n_e.g. 560038_");
+}
+
+async function handlePincodeReply(from, session, raw) {
+  const digits = String(raw || "").replace(/\D/g, "");
+  if (digits.length !== 6) {
+    await sendCloudApiMessage(from, "That doesn't look like a valid pincode. Please send the 6-digit pincode.");
+    return;
+  }
+  session.profile = session.profile || {};
+  session.profile.addrPin = digits;
+  const composed = `${session.profile.addrHouse}, ${session.profile.addrStreet}, ${session.profile.addrCity} ${session.profile.addrPin}`;
+  session.profile.address = composed.slice(0, 300);
 
   const localPhone = normalizeLocalPhone(from);
   let customer = await one("SELECT * FROM customers WHERE phone = ?", [localPhone]);
@@ -1001,6 +1050,48 @@ async function handleAddressReply(from, session, raw) {
     await query("UPDATE customers SET name = ?, address = ? WHERE id = ?", [session.profile.name, session.profile.address, customer.id]);
     customer = { ...customer, name: session.profile.name, address: session.profile.address };
   }
+
+  session.step = "ask_payment";
+  await saveWaSession(from, session);
+  await sendPaymentChoice(from);
+}
+
+async function sendPaymentChoice(to) {
+  return cloudApiRequest({
+    messaging_product: "whatsapp",
+    to,
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: "💳 *Choose payment method*" },
+      action: {
+        buttons: [
+          { type: "reply", reply: { id: "pay_cod", title: "💵 Cash on delivery" } },
+          { type: "reply", reply: { id: "pay_upi", title: "📱 UPI on delivery" } },
+          { type: "reply", reply: { id: "pay_online", title: "💳 Online payment" } }
+        ]
+      }
+    }
+  });
+}
+
+async function handlePaymentReply(from, session, raw) {
+  const text = String(raw || "").trim().toLowerCase();
+  let method = null;
+  if (text === "pay_cod" || text.includes("cash")) method = "Cash on delivery";
+  else if (text === "pay_upi" || text.includes("upi")) method = "UPI on delivery";
+  else if (text === "pay_online" || text.includes("online")) method = "Online payment";
+  if (!method) {
+    await sendCloudApiMessage(from, "Please pick a payment method from the buttons above.");
+    await sendPaymentChoice(from);
+    return;
+  }
+  session.profile = session.profile || {};
+  session.profile.paymentMethod = method;
+  session.step = "confirm";
+  await saveWaSession(from, session);
+  const localPhone = normalizeLocalPhone(from);
+  const customer = await one("SELECT * FROM customers WHERE phone = ?", [localPhone]);
   await sendOrderConfirmation(from, session, customer);
 }
 
@@ -1022,7 +1113,10 @@ async function sendOrderConfirmation(to, session, customer) {
     total += lineTotal;
     return `• ${p.name} × ${qty} — Rs. ${lineTotal}`;
   });
-  const body = `📋 *Confirm your order*\n\n${lines.join("\n")}\n\n*Total: Rs. ${total}*\n\n*Deliver to:* ${customer.name}\n${customer.address}\n\nPayment: Cash on delivery\n\nReply *yes* to confirm, or *cancel* to start over.`;
+  const delivery = total >= 500 ? 0 : 49;
+  const grandTotal = total + delivery;
+  const paymentMethod = session.profile?.paymentMethod || "Cash on delivery";
+  const body = `📋 *Confirm your order*\n\n${lines.join("\n")}\n\nSubtotal: Rs. ${total}\nDelivery: ${delivery === 0 ? "Free" : `Rs. ${delivery}`}\n*Total: Rs. ${grandTotal}*\n\n*Deliver to:* ${customer.name}\n${customer.address}\n\nPayment: ${paymentMethod}\n\nReply *yes* to confirm, or *cancel* to start over.`;
   return cloudApiRequest({
     messaging_product: "whatsapp",
     to,
@@ -1076,14 +1170,17 @@ async function placeWhatsAppOrder(from, session) {
     price: p.price,
     lineTotal: p.price * cart[p.id]
   }));
-  const total = items.reduce((sum, it) => sum + it.lineTotal, 0);
+  const subtotal = items.reduce((sum, it) => sum + it.lineTotal, 0);
+  const delivery = subtotal >= 500 ? 0 : 49;
+  const total = subtotal + delivery;
+  const paymentMethod = session.profile?.paymentMethod || "Cash on delivery";
   const orderId = await nextOrderId();
   await query(
     `INSERT INTO orders (id, customer_id, customer_name, customer_phone, address, frequency, delivery_time, payment_method, payment_status, payment_url, status, items_json, total)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       orderId, customer.id, customer.name, customer.phone, customer.address,
-      "One time", "Any time", "Cash on delivery", "Pending", "",
+      "One time", "Any time", paymentMethod, "Pending", "",
       "Received", JSON.stringify(items), total
     ]
   );
@@ -1091,7 +1188,7 @@ async function placeWhatsAppOrder(from, session) {
   session.cart = {};
   await saveWaSession(from, session);
 
-  await sendCloudApiMessage(from, `✅ *Order confirmed!*\n\nOrder ID: *${orderId}*\nTotal: Rs. ${total}\n\nWe'll deliver soon. Type *hi* anytime to order again.`);
+  await sendCloudApiMessage(from, `✅ *Order confirmed!*\n\nOrder ID: *${orderId}*\nTotal: Rs. ${total}\nPayment: ${paymentMethod}\n\nWe'll deliver soon. Type *hi* anytime to order again.`);
 
   // Notify owner async (same pattern as website orders)
   getOwnerWhatsApp()
