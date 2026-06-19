@@ -711,30 +711,44 @@ async function sendWhatsAppBroadcastTemplate(recipients, title, message) {
     return { sent: recipients.length, failed: 0, demo: true };
   }
 
-  const results = await Promise.allSettled(recipients.map((r) => cloudApiRequest({
-    messaging_product: "whatsapp",
-    to: r.phone,
-    type: "template",
-    template: {
-      name: templateName,
-      language: { code: templateLang },
-      components: [
-        {
-          type: "header",
-          parameters: [
-            { type: "text", parameter_name: "message_title", text: title }
-          ]
-        },
-        {
-          type: "body",
-          parameters: [
-            { type: "text", parameter_name: "customer_name", text: r.name },
-            { type: "text", parameter_name: "message_body", text: message }
-          ]
-        }
+  const buildComponents = (recipient, useNamed) => ([
+    {
+      type: "header",
+      parameters: [
+        useNamed
+          ? { type: "text", parameter_name: "message_title", text: title }
+          : { type: "text", text: title }
+      ]
+    },
+    {
+      type: "body",
+      parameters: [
+        useNamed ? { type: "text", parameter_name: "customer_name", text: recipient.name } : { type: "text", text: recipient.name },
+        useNamed ? { type: "text", parameter_name: "message_body", text: message } : { type: "text", text: message }
       ]
     }
-  })));
+  ]);
+
+  const results = await Promise.allSettled(recipients.map(async (recipient) => {
+    // First attempt: named parameters (newer template format)
+    let res = await cloudApiRequest({
+      messaging_product: "whatsapp",
+      to: recipient.phone,
+      type: "template",
+      template: { name: templateName, language: { code: templateLang }, components: buildComponents(recipient, true) }
+    });
+    // Fallback: positional parameters (older format)
+    if (!res.ok) {
+      console.log(`[WhatsApp] retry positional for ${recipient.phone}, first error: ${res.error}`);
+      res = await cloudApiRequest({
+        messaging_product: "whatsapp",
+        to: recipient.phone,
+        type: "template",
+        template: { name: templateName, language: { code: templateLang }, components: buildComponents(recipient, false) }
+      });
+    }
+    return res;
+  }));
 
   const sent = [];
   const failed = [];
