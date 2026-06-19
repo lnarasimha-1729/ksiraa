@@ -435,12 +435,13 @@ async function handleApi(request, response) {
     if (!customerIds.length) return json(response, 400, { error: "Select at least one customer." });
 
     const placeholders = customerIds.map(() => "?").join(",");
-    const rows = await query(`SELECT phone FROM customers WHERE id IN (${placeholders})`, customerIds);
-    const phones = rows.map((r) => normalizeWhatsAppPhone(r.phone)).filter(Boolean);
-    if (!phones.length) return json(response, 400, { error: "No valid phone numbers in selection." });
+    const rows = await query(`SELECT id, phone, name FROM customers WHERE id IN (${placeholders})`, customerIds);
+    const recipients = rows
+      .map((r) => ({ phone: normalizeWhatsAppPhone(r.phone), name: (r.name || "Customer").trim() || "Customer" }))
+      .filter((r) => r.phone);
+    if (!recipients.length) return json(response, 400, { error: "No valid phone numbers in selection." });
 
-    const text = `KSiraa update\n\n${title}\n${message}`;
-    const result = await sendWhatsAppToPhones(phones, text);
+    const result = await sendWhatsAppBroadcastTemplate(recipients, title, message);
     json(response, 200, {
       sent: result.sent,
       failed: result.failed,
@@ -694,6 +695,58 @@ async function sendWhatsAppBroadcast(notice) {
   }
   const customers = await query("SELECT phone FROM customers");
   return sendWhatsAppToPhones(customers.map((c) => normalizeWhatsAppPhone(c.phone)), message);
+}
+
+async function sendWhatsAppBroadcastTemplate(recipients, title, message) {
+  const templateName = process.env.WHATSAPP_TEMPLATE_NAME;
+  const templateLang = process.env.WHATSAPP_TEMPLATE_LANG || "en";
+
+  if (!templateName) {
+    // No template configured — fall back to plain text (will fail outside 24h window)
+    const text = `*${title}*\n\n${message}`;
+    return sendWhatsAppToPhones(recipients.map((r) => r.phone), text);
+  }
+  if (!process.env.WHATSAPP_PHONE_NUMBER_ID || !process.env.WHATSAPP_ACCESS_TOKEN) {
+    console.log(`[WhatsApp demo] template ${templateName} → ${recipients.length} recipients`);
+    return { sent: recipients.length, failed: 0, demo: true };
+  }
+
+  const results = await Promise.allSettled(recipients.map((r) => cloudApiRequest({
+    messaging_product: "whatsapp",
+    to: r.phone,
+    type: "template",
+    template: {
+      name: templateName,
+      language: { code: templateLang },
+      components: [
+        {
+          type: "header",
+          parameters: [
+            { type: "text", parameter_name: "message_title", text: title }
+          ]
+        },
+        {
+          type: "body",
+          parameters: [
+            { type: "text", parameter_name: "customer_name", text: r.name },
+            { type: "text", parameter_name: "message_body", text: message }
+          ]
+        }
+      ]
+    }
+  })));
+
+  const sent = [];
+  const failed = [];
+  results.forEach((res, i) => {
+    const r = recipients[i];
+    if (res.status === "fulfilled" && res.value.ok) sent.push({ phone: r.phone });
+    else {
+      const err = res.status === "fulfilled" ? res.value.error : res.reason?.message;
+      failed.push({ phone: r.phone, error: err || "Unknown error" });
+    }
+  });
+  return { sent: sent.length, failed: failed.length, details: { sent, failed } };
 }
 
 async function sendWhatsAppToPhones(phones, message) {
