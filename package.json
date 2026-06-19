@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
+    "restart": "powershell -ExecutionPolicy Bypass -File ./restart.ps1",
+    "restart:bg": "powershell -ExecutionPolicy Bypass -File ./restart.ps1 -Background",
     "check": "node --check server.mjs && node --check app.js && node --check db.mjs"
   },
   "engines": {

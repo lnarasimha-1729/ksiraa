@@ -39,7 +39,7 @@ const defaultProducts = [
 await initSchema();
 await seedDefaults();
 
-createServer(async (request, response) => {
+const httpServer = createServer(async (request, response) => {
   try {
     if (request.url?.startsWith("/api/")) {
       await handleApi(request, response);
@@ -54,7 +54,21 @@ createServer(async (request, response) => {
     console.error(error);
     json(response, 500, { error: "Something went wrong. Please try again." });
   }
-}).listen(port, host, () => {
+});
+
+httpServer.on("error", (error) => {
+  if (error.code === "EADDRINUSE") {
+    console.error(`\n[startup] Port ${port} is already in use — another instance is probably still running.`);
+    console.error(`[startup] Stop it first, then start again. On Windows (PowerShell):`);
+    console.error(`[startup]   Get-NetTCPConnection -LocalPort ${port} -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }`);
+    console.error(`[startup] Or set a different port:  $env:PORT=4174; node server.mjs\n`);
+    process.exit(1);
+  }
+  console.error("[startup] Server error:", error);
+  process.exit(1);
+});
+
+httpServer.listen(port, host, () => {
   console.log(`KSiraa app running at http://${host}:${port}`);
   console.log(`Admin phone: ${adminPhone}`);
   console.log("Set ADMIN_PASSWORD and OWNER_WHATSAPP before public hosting.");
