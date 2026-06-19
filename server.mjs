@@ -225,8 +225,21 @@ async function handleApi(request, response) {
   if (route === "POST /api/webhooks/whatsapp") {
     let body = {};
     try { body = await readJson(request); } catch { body = {}; }
+    recordWebhookHit(body);
     json(response, 200, { ok: true });
     handleWhatsAppWebhook(body).catch((err) => console.error("[WhatsApp] webhook handler error:", err));
+    return;
+  }
+
+  // TEMPORARY debug: shows the last few webhook hits so you can confirm Meta is delivering.
+  // Open https://ksiraa.com/api/webhooks/whatsapp/debug?key=ksiraa_verify_token in a browser.
+  if (route === "GET /api/webhooks/whatsapp/debug") {
+    if (url.searchParams.get("key") !== (process.env.WHATSAPP_VERIFY_TOKEN || "ksiraa_verify_token")) {
+      response.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+      response.end("Forbidden");
+      return;
+    }
+    json(response, 200, { count: webhookHits.length, hits: webhookHits });
     return;
   }
 
@@ -808,6 +821,22 @@ function normalizeWhatsAppPhone(phone) {
   if (digits.length === 10) return `91${digits}`;
   if (digits.startsWith("91") && digits.length === 12) return digits;
   return digits;
+}
+
+// TEMPORARY debug ring-buffer of the last 20 webhook payloads.
+const webhookHits = [];
+function recordWebhookHit(body) {
+  try {
+    const msgs = body?.entry?.[0]?.changes?.[0]?.value?.messages || [];
+    webhookHits.unshift({
+      at: new Date().toISOString(),
+      from: msgs[0]?.from || null,
+      type: msgs[0]?.type || null,
+      text: msgs[0]?.text?.body || msgs[0]?.interactive?.list_reply?.id || msgs[0]?.button?.text || null,
+      raw: body
+    });
+    if (webhookHits.length > 20) webhookHits.length = 20;
+  } catch {}
 }
 
 async function handleWhatsAppWebhook(payload) {
