@@ -4,3 +4,5 @@ server.err.log
 server.out.log
 *.log
 .DS_Store
+flow_private_key.pem
+flow_public_key.pem

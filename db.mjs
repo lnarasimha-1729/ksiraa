@@ -39,10 +39,17 @@ export async function initSchema() {
       size VARCHAR(60) NOT NULL,
       price INT NOT NULL,
       description VARCHAR(500) NOT NULL,
+      image_url VARCHAR(500) NOT NULL DEFAULT '',
       sold_out TINYINT(1) NOT NULL DEFAULT 0,
       sort_order INT NOT NULL DEFAULT 0,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  // Add image_url to existing installs that predate the column.
+  await query(`
+    ALTER TABLE products
+    ADD COLUMN IF NOT EXISTS image_url VARCHAR(500) NOT NULL DEFAULT ''
   `);
 
   await query(`

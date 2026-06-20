@@ -1,11 +1,21 @@
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { randomBytes, scryptSync, timingSafeEqual, privateDecrypt, createDecipheriv, createCipheriv, constants as cryptoConstants } from "node:crypto";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = dirname(fileURLToPath(import.meta.url));
 loadEnvFile(join(root, ".env"));
+
+// WhatsApp Flows private key (PEM), used to decrypt the encrypted data-exchange requests.
+let flowPrivateKey = "";
+try {
+  const keyPath = process.env.WHATSAPP_FLOW_PRIVATE_KEY_PATH;
+  if (keyPath) flowPrivateKey = readFileSync(join(root, keyPath), "utf8");
+} catch (e) {
+  console.warn("[Flows] private key not loaded:", e.message);
+}
+const flowId = process.env.WHATSAPP_FLOW_ID || "";
 
 const { pool, query, one, initSchema } = await import("./db.mjs");
 
@@ -141,6 +151,7 @@ function productRowToApi(row) {
     size: row.size,
     price: row.price,
     description: row.description,
+    imageUrl: row.image_url || "",
     soldOut: Boolean(row.sold_out)
   };
 }
@@ -243,6 +254,12 @@ async function handleApi(request, response) {
     return;
   }
 
+  // WhatsApp Flows encrypted data-exchange endpoint.
+  if (route === "POST /api/flows/whatsapp") {
+    await handleFlowDataExchange(request, response);
+    return;
+  }
+
   if (route === "GET /api/products") {
     const rows = await query("SELECT * FROM products ORDER BY sort_order ASC, created_at ASC");
     json(response, 200, { products: rows.map(productRowToApi) });
@@ -342,8 +359,8 @@ async function handleApi(request, response) {
     const product = validateProduct(body);
     const [{ maxOrder }] = await query("SELECT COALESCE(MIN(sort_order), 0) - 1 AS maxOrder FROM products");
     await query(
-      "INSERT INTO products (id, name, size, price, description, sold_out, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [product.id, product.name, product.size, product.price, product.description, product.soldOut ? 1 : 0, maxOrder]
+      "INSERT INTO products (id, name, size, price, description, image_url, sold_out, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [product.id, product.name, product.size, product.price, product.description, product.imageUrl, product.soldOut ? 1 : 0, maxOrder]
     );
     const row = await one("SELECT * FROM products WHERE id = ?", [product.id]);
     json(response, 201, { product: productRowToApi(row) });
@@ -356,8 +373,8 @@ async function handleApi(request, response) {
     const body = await readJson(request);
     const product = validateProduct({ ...productRowToApi(existing), ...body, id: existing.id });
     await query(
-      "UPDATE products SET name = ?, size = ?, price = ?, description = ?, sold_out = ? WHERE id = ?",
-      [product.name, product.size, product.price, product.description, product.soldOut ? 1 : 0, product.id]
+      "UPDATE products SET name = ?, size = ?, price = ?, description = ?, image_url = ?, sold_out = ? WHERE id = ?",
+      [product.name, product.size, product.price, product.description, product.imageUrl, product.soldOut ? 1 : 0, product.id]
     );
     const row = await one("SELECT * FROM products WHERE id = ?", [product.id]);
     json(response, 200, { product: productRowToApi(row) });
@@ -549,6 +566,7 @@ function validateProduct(body) {
     size: cleanText(body.size, 40),
     price: Number(body.price),
     description: cleanText(body.description, 250),
+    imageUrl: cleanText(body.imageUrl, 480),
     soldOut: Boolean(body.soldOut)
   };
   if (!product.name || !product.size || !Number.isFinite(product.price) || product.price <= 0) {
@@ -839,6 +857,148 @@ function recordWebhookHit(body) {
   } catch {}
 }
 
+// ---------------------------------------------------------------------------
+// WhatsApp Flows: encrypted data-exchange endpoint
+// ---------------------------------------------------------------------------
+
+// Decrypts the AES key (RSA-OAEP-SHA256) and the flow payload (AES-128-GCM).
+function decryptFlowRequest(body) {
+  const aesKey = privateDecrypt(
+    { key: flowPrivateKey, padding: cryptoConstants.RSA_PKCS1_OAEP_PADDING, oaepHash: "sha256" },
+    Buffer.from(body.encrypted_aes_key, "base64")
+  );
+  const flowDataBuf = Buffer.from(body.encrypted_flow_data, "base64");
+  const ivBuf = Buffer.from(body.initial_vector, "base64");
+  const TAG_LEN = 16;
+  const encrypted = flowDataBuf.subarray(0, flowDataBuf.length - TAG_LEN);
+  const tag = flowDataBuf.subarray(flowDataBuf.length - TAG_LEN);
+  const decipher = createDecipheriv("aes-128-gcm", aesKey, ivBuf);
+  decipher.setAuthTag(tag);
+  const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+  return { aesKey, ivBuf, payload: JSON.parse(decrypted.toString("utf8")) };
+}
+
+// Encrypts our response with the same AES key but the IV bits flipped (per Meta spec).
+function encryptFlowResponse(responseObj, aesKey, ivBuf) {
+  const flippedIv = Buffer.from(ivBuf.map((b) => b ^ 0xff));
+  const cipher = createCipheriv("aes-128-gcm", aesKey, flippedIv);
+  const encrypted = Buffer.concat([cipher.update(JSON.stringify(responseObj), "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([encrypted, tag]).toString("base64");
+}
+
+const FLOW_MAX_QTY_ROWS = 5;
+
+// SELECT screen: a checkbox list of all in-stock products.
+async function buildFlowSelectScreen() {
+  const products = await query("SELECT * FROM products WHERE sold_out = 0 ORDER BY sort_order ASC, created_at ASC LIMIT 20");
+  return {
+    product_options: products.map((p) => ({
+      id: p.id,
+      title: p.name,
+      description: `${p.size} · Rs. ${p.price}`
+    }))
+  };
+}
+
+// QUANTITIES screen: one qty dropdown per chosen product (up to FLOW_MAX_QTY_ROWS).
+// Flow JSON can't index into arrays, so we expose flat per-slot fields: labelN / optN / visN.
+async function buildFlowQuantityScreen(chosenIds) {
+  const ids = (chosenIds || []).slice(0, FLOW_MAX_QTY_ROWS);
+  const products = await query("SELECT * FROM products WHERE sold_out = 0");
+  const byId = new Map(products.map((p) => [p.id, p]));
+  const qtyOptions = Array.from({ length: 10 }, (_, n) => ({ id: String(n + 1), title: String(n + 1) }));
+  const rows = ids.filter((id) => byId.has(id)).map((id) => byId.get(id));
+
+  const data = { row_ids: rows.map((p) => p.id).join(",") };
+  for (let i = 0; i < FLOW_MAX_QTY_ROWS; i++) {
+    const p = rows[i];
+    data[`label${i}`] = p ? `${p.name} — Rs. ${p.price}` : "";
+    data[`vis${i}`] = Boolean(p);
+    data[`opt${i}`] = p ? qtyOptions : [{ id: "1", title: "1" }];
+  }
+  return data;
+}
+
+async function handleFlowDataExchange(request, response) {
+  if (!flowPrivateKey) {
+    response.writeHead(500, { "Content-Type": "text/plain" });
+    response.end("Flow key not configured");
+    return;
+  }
+  let body;
+  try { body = await readJson(request); } catch { body = null; }
+  if (!body || !body.encrypted_aes_key) {
+    response.writeHead(400, { "Content-Type": "text/plain" });
+    response.end("Bad request");
+    return;
+  }
+
+  let aesKey, ivBuf, payload;
+  try {
+    ({ aesKey, ivBuf, payload } = decryptFlowRequest(body));
+  } catch (e) {
+    console.error("[Flows] decrypt failed:", e.message);
+    // 421 tells Meta to refresh the public key.
+    response.writeHead(421, { "Content-Type": "text/plain" });
+    response.end("Decryption failed");
+    return;
+  }
+
+  const action = payload.action;
+  const screen = payload.screen;
+  const data = payload.data || {};
+  const flowToken = payload.flow_token || "";
+  let responseData;
+
+  if (action === "ping") {
+    // Health check from Meta.
+    responseData = { data: { status: "active" } };
+  } else if (action === "INIT") {
+    responseData = { screen: "SELECT", data: await buildFlowSelectScreen() };
+  } else if (action === "data_exchange" && screen === "SELECT") {
+    // Customer picked which products → show quantity dropdowns for those.
+    const chosen = Array.isArray(data.chosen) ? data.chosen : String(data.chosen || "").split(",").filter(Boolean);
+    responseData = { screen: "QUANTITIES", data: await buildFlowQuantityScreen(chosen) };
+  } else if (action === "data_exchange" && screen === "QUANTITIES") {
+    // Final submit: map q0..qN back to product ids and stash for the nfm_reply webhook.
+    const ids = String(data.ids || "").split(",").filter(Boolean);
+    const selections = {};
+    ids.forEach((id, i) => {
+      const q = data[`q${i}`];
+      if (q != null && String(q) !== "") selections[id] = q;
+    });
+    await saveFlowSelections(flowToken, selections);
+    responseData = {
+      screen: "SUCCESS",
+      data: { extension_message_response: { params: { flow_token: flowToken } } }
+    };
+  } else {
+    responseData = { data: { acknowledged: true } };
+  }
+
+  const encrypted = encryptFlowResponse(responseData, aesKey, ivBuf);
+  response.writeHead(200, { "Content-Type": "text/plain" });
+  response.end(encrypted);
+}
+
+// Temporary store mapping a flow_token -> submitted selections (survives until the nfm_reply arrives).
+async function saveFlowSelections(flowToken, selections) {
+  if (!flowToken) return;
+  await query(
+    `INSERT INTO meta (\`key\`, \`value\`) VALUES (?, ?)
+     ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`)`,
+    [`flow_sel:${flowToken}`, JSON.stringify(selections)]
+  );
+}
+
+async function loadFlowSelections(flowToken) {
+  const row = await one("SELECT `value` FROM meta WHERE `key` = ?", [`flow_sel:${flowToken}`]);
+  if (!row) return null;
+  await query("DELETE FROM meta WHERE `key` = ?", [`flow_sel:${flowToken}`]);
+  try { return JSON.parse(row.value); } catch { return null; }
+}
+
 async function handleWhatsAppWebhook(payload) {
   const entries = payload?.entry || [];
   for (const entry of entries) {
@@ -864,6 +1024,12 @@ async function processIncomingWhatsAppMessage(message, contacts) {
     userInput = String(message.text?.body || "").trim();
   } else if (message.type === "interactive") {
     const inter = message.interactive || {};
+    // Flow completion: the customer submitted the product-selection flow.
+    if (inter.type === "nfm_reply") {
+      const session = await loadWaSession(from);
+      await handleFlowCompletion(from, session, inter.nfm_reply);
+      return;
+    }
     userInput = inter.button_reply?.id || inter.list_reply?.id || "";
     listSelectionId = inter.list_reply?.id || "";
   } else if (message.type === "button") {
@@ -883,8 +1049,8 @@ async function processIncomingWhatsAppMessage(message, contacts) {
     session.cart = {};
     await saveWaSession(from, session);
     const greeting = profileName ? `Hi ${profileName}! 👋` : "Hi! 👋";
-    await sendCloudApiMessage(from, `${greeting}\n\nWelcome to *KSiraa* — fresh dairy delivered to your door.\n\nHere's what's available today:`);
-    await sendProductList(from);
+    await sendCloudApiMessage(from, `${greeting}\n\nWelcome to *KSiraa* — fresh dairy delivered to your door.`);
+    await sendBrowseExperience(from);
     return;
   }
   if (text === "cancel" || text === "stop") {
@@ -902,7 +1068,7 @@ async function processIncomingWhatsAppMessage(message, contacts) {
     session.step = "shopping";
     if (!session.cart) session.cart = {};
     await saveWaSession(from, session);
-    await sendProductList(from);
+    await sendBrowseExperience(from);
     return;
   }
   if (text === "view_cart" || text === "cart") {
@@ -919,7 +1085,14 @@ async function processIncomingWhatsAppMessage(message, contacts) {
   if (text === "add_more") {
     session.step = "shopping";
     await saveWaSession(from, session);
-    await sendProductList(from);
+    await sendBrowseExperience(from);
+    return;
+  }
+
+  // Product-card "Add" button: ask how many before adding.
+  if (userInput && userInput.startsWith("add_")) {
+    const productId = userInput.slice(4);
+    await startAddProduct(from, session, productId);
     return;
   }
 
@@ -965,15 +1138,20 @@ async function loadWaSession(phone) {
   let profile = {};
   try { cart = typeof row.cart_json === "string" ? JSON.parse(row.cart_json) : (row.cart_json || {}); } catch {}
   try { profile = typeof row.profile_json === "string" ? JSON.parse(row.profile_json) : (row.profile_json || {}); } catch {}
-  return { phone, step: row.step || "idle", cart, profile };
+  // pendingProductId is stashed inside profile_json so it survives between messages.
+  const pendingProductId = profile.__pendingProductId || null;
+  return { phone, step: row.step || "idle", cart, profile, pendingProductId };
 }
 
 async function saveWaSession(phone, session) {
+  const profile = { ...(session.profile || {}) };
+  if (session.pendingProductId) profile.__pendingProductId = session.pendingProductId;
+  else delete profile.__pendingProductId;
   await query(
     `INSERT INTO whatsapp_sessions (phone, step, cart_json, profile_json)
      VALUES (?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE step = VALUES(step), cart_json = VALUES(cart_json), profile_json = VALUES(profile_json)`,
-    [phone, session.step || "idle", JSON.stringify(session.cart || {}), JSON.stringify(session.profile || {})]
+    [phone, session.step || "idle", JSON.stringify(session.cart || {}), JSON.stringify(profile)]
   );
 }
 
@@ -1312,9 +1490,46 @@ function normalizeLocalPhone(waPhone) {
   return digits;
 }
 
+// Product-card "Add" tapped: remember which product and ask for quantity.
+async function startAddProduct(from, session, productId) {
+  const product = await one("SELECT * FROM products WHERE id = ? AND sold_out = 0", [productId]);
+  if (!product) {
+    await sendCloudApiMessage(from, "That product isn't available anymore. Type *menu* to see what's in stock.");
+    return;
+  }
+  session.pendingProductId = product.id;
+  session.step = "ask_qty";
+  await saveWaSession(from, session);
+  await sendCloudApiMessage(from, `How many *${product.name}* (${product.size}) would you like?\n\nReply with a number, e.g. *2*.`);
+}
+
 async function handleQtyReply(from, session, raw) {
-  // reserved for future use; not currently routed to
-  await handleShoppingText(from, session, raw);
+  const productId = session.pendingProductId;
+  if (!productId) {
+    // No product pending — treat the reply as normal shopping text.
+    session.step = "shopping";
+    await saveWaSession(from, session);
+    return handleShoppingText(from, session, raw);
+  }
+  const qty = parseInt(String(raw).replace(/[^0-9]/g, ""), 10);
+  if (!qty || qty < 1) {
+    await sendCloudApiMessage(from, "Please reply with a number, e.g. *2*. How many would you like?");
+    return;
+  }
+  const product = await one("SELECT * FROM products WHERE id = ? AND sold_out = 0", [productId]);
+  if (!product) {
+    session.pendingProductId = null;
+    session.step = "shopping";
+    await saveWaSession(from, session);
+    await sendCloudApiMessage(from, "That product isn't available anymore. Type *menu* to see what's in stock.");
+    return;
+  }
+  session.cart = session.cart || {};
+  session.cart[product.id] = (session.cart[product.id] || 0) + qty;
+  session.pendingProductId = null;
+  session.step = "shopping";
+  await saveWaSession(from, session);
+  await sendCloudApiMessage(from, `Added *${qty} × ${product.name}* to your cart (total qty: ${session.cart[product.id]}).\n\nReply *more* to keep shopping, *cart* to view items, or *checkout* to place the order.`);
 }
 
 async function sendWelcomeMessage(to, name) {
@@ -1335,6 +1550,114 @@ async function sendWelcomeMessage(to, name) {
       }
     }
   });
+}
+
+// Fallback product image used when a product has no image_url set.
+const FALLBACK_PRODUCT_IMAGE = `${publicBaseUrl.replace(/\/$/, "")}/assets/ksiraa-product.jpeg`;
+
+function productImageUrl(p) {
+  const u = String(p.image_url || "").trim();
+  if (/^https?:\/\//i.test(u)) return u;
+  return FALLBACK_PRODUCT_IMAGE;
+}
+
+// Chooses the best browse UI: the multi-select Flow if configured, otherwise product cards.
+async function sendBrowseExperience(to) {
+  if (flowId && flowPrivateKey) {
+    try {
+      await sendProductFlow(to);
+      return;
+    } catch (e) {
+      console.error("[Flows] send failed, falling back to cards:", e.message);
+    }
+  }
+  await sendProductCards(to);
+}
+
+// Sends the WhatsApp Flow: one screen with all products and a 0-10 qty dropdown each (multi-select).
+async function sendProductFlow(to) {
+  const flowToken = `ft_${to}_${Date.now()}_${randomBytes(4).toString("hex")}`;
+  return cloudApiRequest({
+    messaging_product: "whatsapp",
+    to,
+    type: "interactive",
+    interactive: {
+      type: "flow",
+      header: { type: "text", text: "KSiraa products" },
+      body: { text: "Tap *Browse products* to pick items and quantities, then submit your order in one go." },
+      footer: { text: "Fresh dairy delivered to your door" },
+      action: {
+        name: "flow",
+        parameters: {
+          flow_message_version: "3",
+          flow_token: flowToken,
+          flow_id: flowId,
+          flow_cta: "Browse products",
+          mode: "published",
+          flow_action: "data_exchange"
+        }
+      }
+    }
+  });
+}
+
+// Customer submitted the flow: read stashed selections, fill the cart, show the summary.
+async function handleFlowCompletion(from, session, nfmReply) {
+  let responseJson = {};
+  try { responseJson = JSON.parse(nfmReply?.response_json || "{}"); } catch {}
+  const flowToken = responseJson.flow_token || "";
+  let selections = await loadFlowSelections(flowToken);
+  // Fallback: some flows return the quantities directly in response_json.
+  if (!selections) selections = responseJson;
+
+  const products = await query("SELECT * FROM products WHERE sold_out = 0");
+  const byId = new Map(products.map((p) => [p.id, p]));
+  session.cart = session.cart || {};
+  let added = 0;
+  for (const [key, val] of Object.entries(selections || {})) {
+    // Keys look like "qty_<productId>" or "<productId>"; values are the chosen quantity.
+    const pid = key.startsWith("qty_") ? key.slice(4) : key;
+    if (!byId.has(pid)) continue;
+    const qty = parseInt(String(val).replace(/[^0-9]/g, ""), 10);
+    if (qty > 0) {
+      session.cart[pid] = (session.cart[pid] || 0) + qty;
+      added += qty;
+    }
+  }
+  session.step = "shopping";
+  await saveWaSession(from, session);
+  if (!added) {
+    await sendCloudApiMessage(from, "Looks like no items were selected. Type *browse* to try again.");
+    return;
+  }
+  await sendCartSummary(from, session);
+}
+
+// Sends each product as its own rich card: image + name/size/price/description + an "Add" button.
+async function sendProductCards(to) {
+  const products = await query("SELECT * FROM products WHERE sold_out = 0 ORDER BY sort_order ASC, created_at ASC LIMIT 10");
+  if (!products.length) {
+    return sendCloudApiMessage(to, "Sorry, no products available right now. Please check back later.");
+  }
+  await sendCloudApiMessage(to, "🛒 *Browse our products* — tap *Add* on any item you want.");
+  for (const p of products) {
+    await cloudApiRequest({
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        header: { type: "image", image: { link: productImageUrl(p) } },
+        body: { text: `*${p.name}*\n${p.size} · Rs. ${p.price}\n\n${p.description || ""}`.trim() },
+        action: {
+          buttons: [
+            { type: "reply", reply: { id: `add_${p.id}`, title: "➕ Add" } }
+          ]
+        }
+      }
+    });
+  }
+  await sendCloudApiMessage(to, "When you're done, type *cart* to review or *checkout* to place your order.");
 }
 
 async function sendProductList(to) {
