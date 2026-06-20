@@ -931,14 +931,17 @@ async function buildFlowAddressScreen(from, selections) {
   };
 }
 
-// Reads the checkbox (pN) + quantity (qN) form fields into { productId: qty }.
+// Reads the checkbox (pN) + quantity chips (qN) form fields into { productId: qty }.
+// ChipsSelector returns an array like ["2"]; Dropdown returned a plain "2".
 function readProductSelections(data) {
   const ids = String(data.ids || "").split(",").filter(Boolean);
   const selections = {};
   ids.forEach((id, i) => {
     const checked = data[`p${i}`] === true || data[`p${i}`] === "true";
     if (!checked) return;
-    const qty = parseInt(String(data[`q${i}`] ?? "1").replace(/[^0-9]/g, ""), 10) || 1;
+    let raw = data[`q${i}`];
+    if (Array.isArray(raw)) raw = raw[0];
+    const qty = parseInt(String(raw ?? "1").replace(/[^0-9]/g, ""), 10) || 1;
     selections[id] = qty;
   });
   return selections;
