@@ -8,12 +8,18 @@ const root = dirname(fileURLToPath(import.meta.url));
 loadEnvFile(join(root, ".env"));
 
 // WhatsApp Flows private key (PEM), used to decrypt the encrypted data-exchange requests.
+// Prefer the inline env var (survives git deploys); fall back to the key file.
 let flowPrivateKey = "";
-try {
-  const keyPath = process.env.WHATSAPP_FLOW_PRIVATE_KEY_PATH;
-  if (keyPath) flowPrivateKey = readFileSync(join(root, keyPath), "utf8");
-} catch (e) {
-  console.warn("[Flows] private key not loaded:", e.message);
+if (process.env.WHATSAPP_FLOW_PRIVATE_KEY) {
+  // Stored on one line with literal \n sequences; turn them back into real newlines.
+  flowPrivateKey = process.env.WHATSAPP_FLOW_PRIVATE_KEY.replace(/\\n/g, "\n").trim();
+} else {
+  try {
+    const keyPath = process.env.WHATSAPP_FLOW_PRIVATE_KEY_PATH;
+    if (keyPath) flowPrivateKey = readFileSync(join(root, keyPath), "utf8");
+  } catch (e) {
+    console.warn("[Flows] private key not loaded:", e.message);
+  }
 }
 const flowId = process.env.WHATSAPP_FLOW_ID || "";
 
