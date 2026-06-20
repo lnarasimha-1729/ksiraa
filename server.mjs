@@ -1562,19 +1562,20 @@ function productImageUrl(p) {
 }
 
 // Chooses the best browse UI: the multi-select Flow if configured, otherwise product cards.
+// Only send the Flow when it is explicitly enabled AND published. Otherwise always
+// use the reliable product cards so the customer never gets a dead/empty reply.
+const flowEnabled = String(process.env.WHATSAPP_FLOW_ENABLED || "").toLowerCase() === "true";
+
 async function sendBrowseExperience(to) {
-  if (flowId && flowPrivateKey) {
-    try {
-      await sendProductFlow(to);
-      return;
-    } catch (e) {
-      console.error("[Flows] send failed, falling back to cards:", e.message);
-    }
+  if (flowEnabled && flowId && flowPrivateKey) {
+    const result = await sendProductFlow(to);
+    if (result && result.ok) return;
+    console.error("[Flows] flow send rejected, falling back to cards:", result && result.error);
   }
   await sendProductCards(to);
 }
 
-// Sends the WhatsApp Flow: one screen with all products and a 0-10 qty dropdown each (multi-select).
+// Sends the WhatsApp Flow as an interactive flow message (multi-select + quantity screens).
 async function sendProductFlow(to) {
   const flowToken = `ft_${to}_${Date.now()}_${randomBytes(4).toString("hex")}`;
   return cloudApiRequest({
