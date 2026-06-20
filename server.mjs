@@ -1553,11 +1553,13 @@ async function sendWelcomeMessage(to, name) {
 }
 
 // Fallback product image used when a product has no image_url set.
-const FALLBACK_PRODUCT_IMAGE = `${publicBaseUrl.replace(/\/$/, "")}/assets/ksiraa-product.jpeg`;
+// WhatsApp must be able to fetch this, so it must be a public https URL — never localhost.
+const publicImageBase = publicBaseUrl.startsWith("https://") ? publicBaseUrl.replace(/\/$/, "") : "https://ksiraa.com";
+const FALLBACK_PRODUCT_IMAGE = `${publicImageBase}/assets/ksiraa-product.jpeg`;
 
 function productImageUrl(p) {
   const u = String(p.image_url || "").trim();
-  if (/^https?:\/\//i.test(u)) return u;
+  if (/^https:\/\//i.test(u)) return u; // only https images are accepted by WhatsApp
   return FALLBACK_PRODUCT_IMAGE;
 }
 
