@@ -887,37 +887,61 @@ function encryptFlowResponse(responseObj, aesKey, ivBuf) {
   return Buffer.concat([encrypted, tag]).toString("base64");
 }
 
-const FLOW_MAX_QTY_ROWS = 5;
+const FLOW_MAX_PRODUCT_ROWS = 5;
 
-// SELECT screen: a checkbox list of all in-stock products.
-async function buildFlowSelectScreen() {
-  const products = await query("SELECT * FROM products WHERE sold_out = 0 ORDER BY sort_order ASC, created_at ASC LIMIT 20");
+// PRODUCTS screen: every in-stock product as a checkbox + quantity dropdown (fixed slots).
+async function buildFlowProductsScreen() {
+  const products = await query("SELECT * FROM products WHERE sold_out = 0 ORDER BY sort_order ASC, created_at ASC LIMIT ?", [FLOW_MAX_PRODUCT_ROWS]);
+  const qtyOptions = Array.from({ length: 10 }, (_, n) => ({ id: String(n + 1), title: String(n + 1) }));
+  const data = {
+    row_ids: products.map((p) => p.id).join(","),
+    qty_options: qtyOptions
+  };
+  for (let i = 0; i < FLOW_MAX_PRODUCT_ROWS; i++) {
+    const p = products[i];
+    data[`name${i}`] = p ? `${p.name} — ${p.size} · Rs. ${p.price}` : "";
+    data[`vis${i}`] = Boolean(p);
+  }
+  return data;
+}
+
+// ADDRESS screen: cart summary + address fields, pre-filled from a saved customer if any.
+async function buildFlowAddressScreen(from, selections) {
+  const products = await query("SELECT * FROM products WHERE sold_out = 0");
+  const byId = new Map(products.map((p) => [p.id, p]));
+  let total = 0;
+  const lines = [];
+  for (const [pid, qty] of Object.entries(selections || {})) {
+    const p = byId.get(pid);
+    if (!p || qty < 1) continue;
+    total += p.price * qty;
+    lines.push(`${qty} × ${p.name}`);
+  }
+  const cartSummary = lines.length ? `${lines.join(", ")}\nTotal: Rs. ${total}` : "No items selected.";
+
+  const localPhone = normalizeLocalPhone(from);
+  const customer = await one("SELECT * FROM customers WHERE phone = ?", [localPhone]).catch(() => null);
   return {
-    product_options: products.map((p) => ({
-      id: p.id,
-      title: p.name,
-      description: `${p.size} · Rs. ${p.price}`
-    }))
+    cart_summary: cartSummary,
+    def_name: customer?.name || "",
+    def_house: "",
+    def_street: "",
+    def_city: "",
+    def_pincode: ""
   };
 }
 
-// QUANTITIES screen: one qty dropdown per chosen product (up to FLOW_MAX_QTY_ROWS).
-// Flow JSON can't index into arrays, so we expose flat per-slot fields: labelN / optN / visN.
-async function buildFlowQuantityScreen(chosenIds) {
-  const ids = (chosenIds || []).slice(0, FLOW_MAX_QTY_ROWS);
-  const products = await query("SELECT * FROM products WHERE sold_out = 0");
-  const byId = new Map(products.map((p) => [p.id, p]));
-  const qtyOptions = Array.from({ length: 10 }, (_, n) => ({ id: String(n + 1), title: String(n + 1) }));
-  const rows = ids.filter((id) => byId.has(id)).map((id) => byId.get(id));
-
-  const data = { row_ids: rows.map((p) => p.id).join(",") };
-  for (let i = 0; i < FLOW_MAX_QTY_ROWS; i++) {
-    const p = rows[i];
-    data[`label${i}`] = p ? `${p.name} — Rs. ${p.price}` : "";
-    data[`vis${i}`] = Boolean(p);
-    data[`opt${i}`] = p ? qtyOptions : [{ id: "1", title: "1" }];
-  }
-  return data;
+// Reads the checkbox (pN) + quantity (qN) form fields into { productId: qty }.
+function readProductSelections(data) {
+  const ids = String(data.ids || "").split(",").filter(Boolean);
+  const selections = {};
+  ids.forEach((id, i) => {
+    const checked = data[`p${i}`] === true || data[`p${i}`] === "true";
+    if (!checked) return;
+    const qty = parseInt(String(data[`q${i}`] ?? "1").replace(/[^0-9]/g, ""), 10) || 1;
+    selections[id] = qty;
+  });
+  return selections;
 }
 
 async function handleFlowDataExchange(request, response) {
@@ -951,24 +975,30 @@ async function handleFlowDataExchange(request, response) {
   const flowToken = payload.flow_token || "";
   let responseData;
 
+  // The customer's phone is carried in the flow_token (ft_<phone>_...).
+  const tokenPhone = flowToken.startsWith("ft_") ? flowToken.split("_")[1] : "";
+
   if (action === "ping") {
     // Health check from Meta.
     responseData = { data: { status: "active" } };
   } else if (action === "INIT") {
-    responseData = { screen: "SELECT", data: await buildFlowSelectScreen() };
-  } else if (action === "data_exchange" && screen === "SELECT") {
-    // Customer picked which products → show quantity dropdowns for those.
-    const chosen = Array.isArray(data.chosen) ? data.chosen : String(data.chosen || "").split(",").filter(Boolean);
-    responseData = { screen: "QUANTITIES", data: await buildFlowQuantityScreen(chosen) };
-  } else if (action === "data_exchange" && screen === "QUANTITIES") {
-    // Final submit: map q0..qN back to product ids and stash for the nfm_reply webhook.
-    const ids = String(data.ids || "").split(",").filter(Boolean);
-    const selections = {};
-    ids.forEach((id, i) => {
-      const q = data[`q${i}`];
-      if (q != null && String(q) !== "") selections[id] = q;
-    });
+    responseData = { screen: "PRODUCTS", data: await buildFlowProductsScreen() };
+  } else if (action === "data_exchange" && screen === "PRODUCTS") {
+    // Products chosen → stash selections and show the address screen.
+    const selections = readProductSelections(data);
     await saveFlowSelections(flowToken, selections);
+    responseData = { screen: "ADDRESS", data: await buildFlowAddressScreen(tokenPhone, selections) };
+  } else if (action === "data_exchange" && screen === "ADDRESS") {
+    // Address submitted → stash address with the selections; the nfm_reply webhook places the order.
+    const selections = (await loadFlowSelections(flowToken)) || {};
+    const address = {
+      name: String(data.name || "").trim(),
+      house: String(data.house || "").trim(),
+      street: String(data.street || "").trim(),
+      city: String(data.city || "").trim(),
+      pincode: String(data.pincode || "").trim()
+    };
+    await saveFlowSelections(flowToken, { __selections: selections, __address: address });
     responseData = {
       screen: "SUCCESS",
       data: { extension_message_response: { params: { flow_token: flowToken } } }
@@ -1587,7 +1617,7 @@ async function sendProductFlow(to) {
     interactive: {
       type: "flow",
       header: { type: "text", text: "KSiraa products" },
-      body: { text: "Tap *Browse products* to pick items and quantities, then submit your order in one go." },
+      body: { text: "Browse our fresh dairy products, pick what you want with quantities, and place your order — all in one place." },
       footer: { text: "Fresh dairy delivered to your door" },
       action: {
         name: "flow",
@@ -1595,7 +1625,7 @@ async function sendProductFlow(to) {
           flow_message_version: "3",
           flow_token: flowToken,
           flow_id: flowId,
-          flow_cta: "Browse products",
+          flow_cta: "View products",
           mode: "published",
           flow_action: "data_exchange"
         }
@@ -1609,30 +1639,46 @@ async function handleFlowCompletion(from, session, nfmReply) {
   let responseJson = {};
   try { responseJson = JSON.parse(nfmReply?.response_json || "{}"); } catch {}
   const flowToken = responseJson.flow_token || "";
-  let selections = await loadFlowSelections(flowToken);
-  // Fallback: some flows return the quantities directly in response_json.
-  if (!selections) selections = responseJson;
+  const stored = await loadFlowSelections(flowToken);
+
+  // The ADDRESS submit stored { __selections, __address }.
+  const selections = stored?.__selections || stored || {};
+  const address = stored?.__address || null;
 
   const products = await query("SELECT * FROM products WHERE sold_out = 0");
   const byId = new Map(products.map((p) => [p.id, p]));
-  session.cart = session.cart || {};
+  session.cart = {};
   let added = 0;
-  for (const [key, val] of Object.entries(selections || {})) {
-    // Keys look like "qty_<productId>" or "<productId>"; values are the chosen quantity.
-    const pid = key.startsWith("qty_") ? key.slice(4) : key;
+  for (const [pid, val] of Object.entries(selections || {})) {
     if (!byId.has(pid)) continue;
     const qty = parseInt(String(val).replace(/[^0-9]/g, ""), 10);
-    if (qty > 0) {
-      session.cart[pid] = (session.cart[pid] || 0) + qty;
-      added += qty;
-    }
+    if (qty > 0) { session.cart[pid] = qty; added += qty; }
   }
-  session.step = "shopping";
-  await saveWaSession(from, session);
+
   if (!added) {
-    await sendCloudApiMessage(from, "Looks like no items were selected. Type *browse* to try again.");
+    session.step = "shopping";
+    await saveWaSession(from, session);
+    await sendCloudApiMessage(from, "Looks like no items were selected. Type *hi* to try again.");
     return;
   }
+
+  // If the flow collected an address, save the customer and place the order directly.
+  if (address && address.name) {
+    const localPhone = normalizeLocalPhone(from);
+    const fullAddress = [address.house, address.street, address.city, address.pincode].filter(Boolean).join(", ");
+    await query(
+      `INSERT INTO customers (id, phone, name, address) VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE name = VALUES(name), address = VALUES(address)`,
+      [id("cust"), localPhone, address.name, fullAddress]
+    );
+    await saveWaSession(from, session);
+    await placeWhatsAppOrder(from, session);
+    return;
+  }
+
+  // No address (older flow) — fall back to showing the cart.
+  session.step = "shopping";
+  await saveWaSession(from, session);
   await sendCartSummary(from, session);
 }
 

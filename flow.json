@@ -2,27 +2,29 @@
   "version": "7.0",
   "data_api_version": "3.0",
   "routing_model": {
-    "SELECT": ["QUANTITIES"],
-    "QUANTITIES": []
+    "PRODUCTS": ["ADDRESS"],
+    "ADDRESS": []
   },
   "screens": [
     {
-      "id": "SELECT",
+      "id": "PRODUCTS",
       "title": "Choose products",
       "data": {
-        "product_options": {
+        "row_ids": { "type": "string", "__example__": "ghee-500,butter-250" },
+        "name0": { "type": "string", "__example__": "Pure Desi Ghee — 500 g jar · Rs. 699" },
+        "name1": { "type": "string", "__example__": "" },
+        "name2": { "type": "string", "__example__": "" },
+        "name3": { "type": "string", "__example__": "" },
+        "name4": { "type": "string", "__example__": "" },
+        "vis0": { "type": "boolean", "__example__": true },
+        "vis1": { "type": "boolean", "__example__": false },
+        "vis2": { "type": "boolean", "__example__": false },
+        "vis3": { "type": "boolean", "__example__": false },
+        "vis4": { "type": "boolean", "__example__": false },
+        "qty_options": {
           "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "id": { "type": "string" },
-              "title": { "type": "string" },
-              "description": { "type": "string" }
-            }
-          },
-          "__example__": [
-            { "id": "ghee-500", "title": "Pure Desi Ghee", "description": "500 g jar · Rs. 699" }
-          ]
+          "items": { "type": "object", "properties": { "id": { "type": "string" }, "title": { "type": "string" } } },
+          "__example__": [ { "id": "1", "title": "1" }, { "id": "2", "title": "2" } ]
         }
       },
       "layout": {
@@ -30,26 +32,38 @@
         "children": [
           {
             "type": "TextHeading",
-            "text": "What would you like?"
+            "text": "Select your items"
+          },
+          {
+            "type": "TextBody",
+            "text": "Tick the products you want and choose a quantity for each."
           },
           {
             "type": "Form",
-            "name": "select_form",
+            "name": "products_form",
             "children": [
-              {
-                "type": "CheckboxGroup",
-                "name": "chosen",
-                "label": "Tap the products you want",
-                "required": true,
-                "data-source": "${data.product_options}"
-              },
+              { "type": "OptIn", "name": "p0", "label": "${data.name0}", "visible": "${data.vis0}", "required": false },
+              { "type": "Dropdown", "name": "q0", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.vis0}", "required": false },
+              { "type": "OptIn", "name": "p1", "label": "${data.name1}", "visible": "${data.vis1}", "required": false },
+              { "type": "Dropdown", "name": "q1", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.vis1}", "required": false },
+              { "type": "OptIn", "name": "p2", "label": "${data.name2}", "visible": "${data.vis2}", "required": false },
+              { "type": "Dropdown", "name": "q2", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.vis2}", "required": false },
+              { "type": "OptIn", "name": "p3", "label": "${data.name3}", "visible": "${data.vis3}", "required": false },
+              { "type": "Dropdown", "name": "q3", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.vis3}", "required": false },
+              { "type": "OptIn", "name": "p4", "label": "${data.name4}", "visible": "${data.vis4}", "required": false },
+              { "type": "Dropdown", "name": "q4", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.vis4}", "required": false },
               {
                 "type": "Footer",
-                "label": "Continue",
+                "label": "Continue to address",
                 "on-click-action": {
                   "name": "data_exchange",
                   "payload": {
-                    "chosen": "${form.chosen}"
+                    "ids": "${data.row_ids}",
+                    "p0": "${form.p0}", "q0": "${form.q0}",
+                    "p1": "${form.p1}", "q1": "${form.q1}",
+                    "p2": "${form.p2}", "q2": "${form.q2}",
+                    "p3": "${form.p3}", "q3": "${form.q3}",
+                    "p4": "${form.p4}", "q4": "${form.q4}"
                   }
                 }
               }
@@ -59,111 +73,49 @@
       }
     },
     {
-      "id": "QUANTITIES",
-      "title": "Set quantities",
+      "id": "ADDRESS",
+      "title": "Delivery address",
       "terminal": true,
       "success": true,
       "data": {
-        "row_ids": { "type": "string", "__example__": "ghee-500,butter-250" },
-        "label0": { "type": "string", "__example__": "Pure Desi Ghee — Rs. 699" },
-        "label1": { "type": "string", "__example__": "" },
-        "label2": { "type": "string", "__example__": "" },
-        "label3": { "type": "string", "__example__": "" },
-        "label4": { "type": "string", "__example__": "" },
-        "vis0": { "type": "boolean", "__example__": true },
-        "vis1": { "type": "boolean", "__example__": false },
-        "vis2": { "type": "boolean", "__example__": false },
-        "vis3": { "type": "boolean", "__example__": false },
-        "vis4": { "type": "boolean", "__example__": false },
-        "opt0": {
-          "type": "array",
-          "items": { "type": "object", "properties": { "id": { "type": "string" }, "title": { "type": "string" } } },
-          "__example__": [ { "id": "1", "title": "1" }, { "id": "2", "title": "2" } ]
-        },
-        "opt1": {
-          "type": "array",
-          "items": { "type": "object", "properties": { "id": { "type": "string" }, "title": { "type": "string" } } },
-          "__example__": [ { "id": "1", "title": "1" } ]
-        },
-        "opt2": {
-          "type": "array",
-          "items": { "type": "object", "properties": { "id": { "type": "string" }, "title": { "type": "string" } } },
-          "__example__": [ { "id": "1", "title": "1" } ]
-        },
-        "opt3": {
-          "type": "array",
-          "items": { "type": "object", "properties": { "id": { "type": "string" }, "title": { "type": "string" } } },
-          "__example__": [ { "id": "1", "title": "1" } ]
-        },
-        "opt4": {
-          "type": "array",
-          "items": { "type": "object", "properties": { "id": { "type": "string" }, "title": { "type": "string" } } },
-          "__example__": [ { "id": "1", "title": "1" } ]
-        }
+        "cart_summary": { "type": "string", "__example__": "1 × Pure Desi Ghee" },
+        "def_name": { "type": "string", "__example__": "" },
+        "def_house": { "type": "string", "__example__": "" },
+        "def_street": { "type": "string", "__example__": "" },
+        "def_city": { "type": "string", "__example__": "" },
+        "def_pincode": { "type": "string", "__example__": "" }
       },
       "layout": {
         "type": "SingleColumnLayout",
         "children": [
           {
             "type": "TextHeading",
-            "text": "How many of each?"
+            "text": "Where should we deliver?"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.cart_summary}"
           },
           {
             "type": "Form",
-            "name": "qty_form",
+            "name": "address_form",
             "children": [
-              {
-                "type": "Dropdown",
-                "name": "q0",
-                "label": "${data.label0}",
-                "data-source": "${data.opt0}",
-                "visible": "${data.vis0}",
-                "required": false
-              },
-              {
-                "type": "Dropdown",
-                "name": "q1",
-                "label": "${data.label1}",
-                "data-source": "${data.opt1}",
-                "visible": "${data.vis1}",
-                "required": false
-              },
-              {
-                "type": "Dropdown",
-                "name": "q2",
-                "label": "${data.label2}",
-                "data-source": "${data.opt2}",
-                "visible": "${data.vis2}",
-                "required": false
-              },
-              {
-                "type": "Dropdown",
-                "name": "q3",
-                "label": "${data.label3}",
-                "data-source": "${data.opt3}",
-                "visible": "${data.vis3}",
-                "required": false
-              },
-              {
-                "type": "Dropdown",
-                "name": "q4",
-                "label": "${data.label4}",
-                "data-source": "${data.opt4}",
-                "visible": "${data.vis4}",
-                "required": false
-              },
+              { "type": "TextInput", "name": "name", "label": "Full name", "input-type": "text", "required": true },
+              { "type": "TextInput", "name": "house", "label": "House / flat no.", "input-type": "text", "required": true },
+              { "type": "TextInput", "name": "street", "label": "Street / area", "input-type": "text", "required": true },
+              { "type": "TextInput", "name": "city", "label": "City", "input-type": "text", "required": true },
+              { "type": "TextInput", "name": "pincode", "label": "Pincode", "input-type": "number", "required": true },
               {
                 "type": "Footer",
-                "label": "Submit order",
+                "label": "Place order",
                 "on-click-action": {
                   "name": "data_exchange",
                   "payload": {
-                    "ids": "${data.row_ids}",
-                    "q0": "${form.q0}",
-                    "q1": "${form.q1}",
-                    "q2": "${form.q2}",
-                    "q3": "${form.q3}",
-                    "q4": "${form.q4}"
+                    "name": "${form.name}",
+                    "house": "${form.house}",
+                    "street": "${form.street}",
+                    "city": "${form.city}",
+                    "pincode": "${form.pincode}"
                   }
                 }
               }
