@@ -514,6 +514,20 @@ async function handleApi(request, response) {
     return;
   }
 
+  if (route === "POST /api/admin/carousel/reorder") {
+    await requireSession(request, "admin");
+    const body = await readJson(request);
+    const ids = Array.isArray(body.ids) ? body.ids.map((x) => String(x)) : [];
+    if (!ids.length) return json(response, 400, { error: "No order provided." });
+    // Persist the new order: position in the array becomes sort_order.
+    for (let i = 0; i < ids.length; i++) {
+      await query("UPDATE carousel_slides SET sort_order = ? WHERE id = ?", [i, ids[i]]);
+    }
+    const rows = await query("SELECT id, image_path, media_type, created_at FROM carousel_slides ORDER BY sort_order ASC, created_at ASC");
+    json(response, 200, { slides: rows.map(carouselRowToApi) });
+    return;
+  }
+
   if (request.method === "DELETE" && url.pathname.startsWith("/api/admin/carousel/")) {
     await requireSession(request, "admin");
     const slideId = decodeURIComponent(url.pathname.split("/").pop() || "");

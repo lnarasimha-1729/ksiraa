@@ -505,17 +505,34 @@ function bindAdminActions() {
   });
 
   els.adminCarousel?.addEventListener("click", async (event) => {
-    const button = event.target.closest("button[data-action='delete-slide']");
+    const button = event.target.closest("button[data-action]");
     if (!button) return;
-    if (!confirm("Remove this item from the carousel?")) return;
-    await api(`/api/admin/carousel/${encodeURIComponent(button.dataset.id)}`, {
-      method: "DELETE",
-      token: state.adminToken
-    });
-    await refreshPublicData();
-    renderAll();
-    toast("Removed.");
+    const action = button.dataset.action;
+
+    if (action === "delete-slide") {
+      if (!confirm("Remove this item from the carousel?")) return;
+      await api(`/api/admin/carousel/${encodeURIComponent(button.dataset.id)}`, {
+        method: "DELETE",
+        token: state.adminToken
+      });
+      await refreshPublicData();
+      renderAll();
+      toast("Removed.");
+      return;
+    }
+
+    if (action === "move-up" || action === "move-down") {
+      const ids = (state.carousel || []).map((s) => s.id);
+      const from = ids.indexOf(button.dataset.id);
+      const to = action === "move-up" ? from - 1 : from + 1;
+      if (from < 0 || to < 0 || to >= ids.length) return;
+      [ids[from], ids[to]] = [ids[to], ids[from]];
+      await saveCarouselOrder(ids);
+    }
   });
+
+  // Drag-and-drop reordering of carousel rows.
+  bindCarouselDragReorder();
 
   els.adminProducts.addEventListener("click", async (event) => {
     const button = event.target.closest("button");
@@ -865,12 +882,74 @@ function renderAdminCarousel() {
     const media = slide.mediaType === "video"
       ? `<video src="${escapeHtml(slide.imageUrl)}" muted loop playsinline></video>`
       : `<img src="${escapeHtml(slide.imageUrl)}" alt="Slide ${i + 1}">`;
+    const last = i === slides.length - 1;
     return `
-    <div class="carousel-admin-row">
+    <div class="carousel-admin-row" draggable="true" data-id="${escapeHtml(slide.id)}">
+      <span class="carousel-drag-handle" aria-hidden="true" title="Drag to reorder">&#8942;&#8942;</span>
       ${media}
-      <button class="mini-button danger" data-action="delete-slide" data-id="${escapeHtml(slide.id)}" type="button">Delete</button>
+      <div class="carousel-row-actions">
+        <button class="mini-button order-btn" data-action="move-up" data-id="${escapeHtml(slide.id)}" type="button" aria-label="Move up"${i === 0 ? " disabled" : ""}>&#8593;</button>
+        <button class="mini-button order-btn" data-action="move-down" data-id="${escapeHtml(slide.id)}" type="button" aria-label="Move down"${last ? " disabled" : ""}>&#8595;</button>
+        <button class="mini-button danger" data-action="delete-slide" data-id="${escapeHtml(slide.id)}" type="button">Delete</button>
+      </div>
     </div>`;
   }).join("");
+}
+
+async function saveCarouselOrder(ids) {
+  try {
+    const result = await api("/api/admin/carousel/reorder", {
+      method: "POST",
+      token: state.adminToken,
+      body: { ids }
+    });
+    state.carousel = result.slides || [];
+    renderAll();
+  } catch (error) {
+    toast(error.message || "Could not save the new order.");
+    await refreshPublicData();
+    renderAll();
+  }
+}
+
+// Lets the admin drag carousel rows up/down to reorder them.
+function bindCarouselDragReorder() {
+  const list = els.adminCarousel;
+  if (!list || list.dataset.dragBound === "1") return;
+  list.dataset.dragBound = "1"; // bind the listeners once; rows are recreated on each render
+
+  let draggingId = null;
+
+  list.addEventListener("dragstart", (event) => {
+    const row = event.target.closest(".carousel-admin-row");
+    if (!row) return;
+    draggingId = row.dataset.id;
+    row.classList.add("dragging");
+    event.dataTransfer.effectAllowed = "move";
+  });
+
+  list.addEventListener("dragend", () => {
+    list.querySelectorAll(".carousel-admin-row").forEach((r) => r.classList.remove("dragging", "drag-over"));
+    draggingId = null;
+  });
+
+  list.addEventListener("dragover", (event) => {
+    event.preventDefault(); // allow drop
+    const over = event.target.closest(".carousel-admin-row");
+    list.querySelectorAll(".carousel-admin-row").forEach((r) => r.classList.toggle("drag-over", r === over && !r.classList.contains("dragging")));
+  });
+
+  list.addEventListener("drop", async (event) => {
+    event.preventDefault();
+    const target = event.target.closest(".carousel-admin-row");
+    if (!target || !draggingId || target.dataset.id === draggingId) return;
+    const ids = (state.carousel || []).map((s) => s.id);
+    const from = ids.indexOf(draggingId);
+    const to = ids.indexOf(target.dataset.id);
+    if (from < 0 || to < 0) return;
+    ids.splice(to, 0, ids.splice(from, 1)[0]); // move dragged item to target position
+    await saveCarouselOrder(ids);
+  });
 }
 
 function fileToDataUrl(file) {
