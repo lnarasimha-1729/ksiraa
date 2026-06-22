@@ -905,7 +905,8 @@ async function buildFlowProductsScreen() {
   };
   for (let i = 0; i < FLOW_MAX_PRODUCT_ROWS; i++) {
     const p = products[i];
-    data[`name${i}`] = p ? `${p.name} — ${p.size} · Rs. ${p.price}` : "";
+    data[`name${i}`] = p ? p.name : "";
+    data[`meta${i}`] = p ? `${p.size} · Rs. ${p.price}` : "";
     data[`vis${i}`] = Boolean(p);
   }
   return data;
