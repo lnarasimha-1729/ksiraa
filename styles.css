@@ -260,9 +260,18 @@ main {
   border-top: 1px solid var(--on-dark-line);
   color: var(--on-dark-muted);
   display: flex;
-  gap: 28px;
+  flex-wrap: wrap;
+  gap: 16px 28px;
   justify-content: center;
   padding: 36px 22px;
+  text-align: center;
+}
+
+.site-footer-attribution {
+  color: var(--on-dark-muted);
+  flex-basis: 100%;
+  font-size: 0.8rem;
+  opacity: 0.7;
 }
 
 .site-footer a {
