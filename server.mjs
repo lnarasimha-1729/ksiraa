@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, readFileSync, statSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { randomBytes, scryptSync, timingSafeEqual, privateDecrypt, createDecipheriv, createCipheriv, constants as cryptoConstants } from "node:crypto";
 import { dirname, extname, join, normalize } from "node:path";
@@ -6,9 +6,6 @@ import { fileURLToPath } from "node:url";
 
 const root = dirname(fileURLToPath(import.meta.url));
 loadEnvFile(join(root, ".env"));
-
-// Where admin-uploaded carousel images are stored on disk (served statically under /assets/carousel).
-const carouselDir = join(root, "assets", "carousel");
 
 // WhatsApp Flows private key (PEM), used to decrypt the encrypted data-exchange requests.
 // Prefer the inline env var (survives git deploys); fall back to the key file.
@@ -65,6 +62,10 @@ const httpServer = createServer(async (request, response) => {
   try {
     if (request.url?.startsWith("/api/")) {
       await handleApi(request, response);
+      return;
+    }
+    if (request.method === "GET" && request.url?.startsWith("/assets/carousel/")) {
+      await serveCarouselMedia(request, response);
       return;
     }
     serveStatic(request, response);
@@ -288,7 +289,8 @@ async function handleApi(request, response) {
   }
 
   if (route === "GET /api/carousel") {
-    const rows = await query("SELECT * FROM carousel_slides ORDER BY sort_order ASC, created_at ASC");
+    // Exclude the heavy `data` blob from the list — media is fetched per-slide.
+    const rows = await query("SELECT id, image_path, media_type, created_at FROM carousel_slides ORDER BY sort_order ASC, created_at ASC");
     json(response, 200, { slides: rows.map(carouselRowToApi) });
     return;
   }
@@ -499,14 +501,15 @@ async function handleApi(request, response) {
   if (route === "POST /api/admin/carousel") {
     await requireSession(request, "admin");
     const body = await readJson(request, 56_000_000);
-    const saved = saveCarouselUpload(body.image);
+    const saved = parseCarouselUpload(body.image);
     const slideId = id("slide");
+    const urlPath = `/assets/carousel/${slideId}`;
     const [{ maxOrder }] = await query("SELECT COALESCE(MAX(sort_order), 0) + 1 AS maxOrder FROM carousel_slides");
     await query(
-      "INSERT INTO carousel_slides (id, image_path, media_type, sort_order) VALUES (?, ?, ?, ?)",
-      [slideId, saved.urlPath, saved.mediaType, maxOrder]
+      "INSERT INTO carousel_slides (id, image_path, media_type, mime, data, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+      [slideId, urlPath, saved.mediaType, saved.mime, saved.buffer, maxOrder]
     );
-    const row = await one("SELECT * FROM carousel_slides WHERE id = ?", [slideId]);
+    const row = await one("SELECT id, image_path, media_type, created_at FROM carousel_slides WHERE id = ?", [slideId]);
     json(response, 201, { slide: carouselRowToApi(row) });
     return;
   }
@@ -514,10 +517,9 @@ async function handleApi(request, response) {
   if (request.method === "DELETE" && url.pathname.startsWith("/api/admin/carousel/")) {
     await requireSession(request, "admin");
     const slideId = decodeURIComponent(url.pathname.split("/").pop() || "");
-    const existing = await one("SELECT * FROM carousel_slides WHERE id = ?", [slideId]);
+    const existing = await one("SELECT id FROM carousel_slides WHERE id = ?", [slideId]);
     if (!existing) return json(response, 404, { error: "Slide not found." });
     await query("DELETE FROM carousel_slides WHERE id = ?", [existing.id]);
-    deleteCarouselFile(existing.image_path);
     json(response, 200, { ok: true });
     return;
   }
@@ -551,12 +553,38 @@ async function handleApi(request, response) {
   json(response, 404, { error: "Not found." });
 }
 
+// Serves carousel media bytes from the DB so every server (and device) shows the same files.
+async function serveCarouselMedia(request, response) {
+  const url = new URL(request.url || "/", `http://${request.headers.host}`);
+  const slideId = decodeURIComponent(url.pathname.split("/").pop() || "");
+  const row = await one("SELECT mime, data FROM carousel_slides WHERE id = ?", [slideId]);
+  if (!row || !row.data) {
+    response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end("Not found");
+    return;
+  }
+  response.writeHead(200, {
+    "Content-Type": row.mime || "application/octet-stream",
+    "Content-Length": row.data.length,
+    "Cache-Control": "public, max-age=86400"
+  });
+  response.end(row.data);
+}
+
 function serveStatic(request, response) {
   const url = new URL(request.url || "/", `http://${request.headers.host}`);
   const requested = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, "");
   let filePath = join(root, requested === "/" ? "index.html" : requested);
 
-  if (!existsSync(filePath) || statSync(filePath).isDirectory()) {
+  const missing = !existsSync(filePath) || statSync(filePath).isDirectory();
+  if (missing) {
+    // A missing asset must 404 — never fall back to index.html, or media elements
+    // (img/video) receive an HTML page as their source ("no supported sources").
+    if (requested.startsWith("/assets/") || extname(filePath)) {
+      response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      response.end("Not found");
+      return;
+    }
     filePath = join(root, "index.html");
   }
 
@@ -687,25 +715,25 @@ function cleanChoice(value, allowed, fallback) {
   return allowed.includes(value) ? value : fallback;
 }
 
-// Accepts a data URL ("data:image/png;base64,...." or "data:video/mp4;base64,...."),
-// validates the type, writes it under assets/carousel/, and returns the public URL path + media type.
-const carouselMimeExt = {
-  "image/jpeg": { ext: ".jpg", type: "image" },
-  "image/jpg": { ext: ".jpg", type: "image" },
-  "image/png": { ext: ".png", type: "image" },
-  "image/webp": { ext: ".webp", type: "image" },
-  "video/mp4": { ext: ".mp4", type: "video" },
-  "video/webm": { ext: ".webm", type: "video" }
+// Accepts a data URL ("data:image/png;base64,...." or "data:video/mp4;base64,....") and
+// validates the type. Returns the raw bytes + mime + media type to store in the DB.
+const carouselMimeInfo = {
+  "image/jpeg": { type: "image" },
+  "image/jpg": { type: "image", mime: "image/jpeg" },
+  "image/png": { type: "image" },
+  "image/webp": { type: "image" },
+  "video/mp4": { type: "video" },
+  "video/webm": { type: "video" }
 };
 
 const carouselMaxImageBytes = 6_000_000;   // 6 MB
 const carouselMaxVideoBytes = 40_000_000;  // 40 MB
 
-function saveCarouselUpload(dataUrl) {
+function parseCarouselUpload(dataUrl) {
   const match = /^data:([^;]+);base64,(.+)$/s.exec(String(dataUrl || ""));
   if (!match) throw httpError(400, "Choose an image or video file to upload.");
-  const mime = match[1].toLowerCase();
-  const info = carouselMimeExt[mime];
+  const rawMime = match[1].toLowerCase();
+  const info = carouselMimeInfo[rawMime];
   if (!info) throw httpError(400, "Only JPG, PNG, WebP images or MP4/WebM videos are allowed.");
   const buffer = Buffer.from(match[2], "base64");
   if (!buffer.length) throw httpError(400, "The file could not be read.");
@@ -713,23 +741,7 @@ function saveCarouselUpload(dataUrl) {
   if (buffer.length > maxBytes) {
     throw httpError(413, info.type === "video" ? "Video is too large (max 40 MB)." : "Image is too large (max 6 MB).");
   }
-
-  if (!existsSync(carouselDir)) mkdirSync(carouselDir, { recursive: true });
-  const fileName = `${Date.now().toString(36)}_${randomBytes(4).toString("hex")}${info.ext}`;
-  writeFileSync(join(carouselDir, fileName), buffer);
-  return { urlPath: `/assets/carousel/${fileName}`, mediaType: info.type };
-}
-
-function deleteCarouselFile(urlPath) {
-  // Only delete files we manage, and never escape the carousel directory.
-  const name = String(urlPath || "").replace(/^\/assets\/carousel\//, "");
-  if (!name || name.includes("/") || name.includes("\\") || name.includes("..")) return;
-  const filePath = join(carouselDir, name);
-  try {
-    if (existsSync(filePath)) unlinkSync(filePath);
-  } catch (err) {
-    console.warn("[carousel] could not delete file:", err.message);
-  }
+  return { buffer, mediaType: info.type, mime: info.mime || rawMime };
 }
 
 function readJson(request, maxBytes = 1_000_000) {

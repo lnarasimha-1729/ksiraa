@@ -113,7 +113,14 @@ function renderHeroCarousel() {
         event.stopPropagation();
         if (video.paused) {
           stopAuto();                 // user is watching — don't advance the carousel
-          video.play();
+          const p = video.play();
+          // play() returns a promise that rejects if the source can't be played.
+          if (p && typeof p.catch === "function") {
+            p.catch((err) => {
+              console.warn("Carousel video could not play:", err?.message || err);
+              wrap.classList.add("video-error");
+            });
+          }
         } else {
           video.pause();
         }
@@ -123,6 +130,7 @@ function renderHeroCarousel() {
       video.addEventListener("play", () => { wrap.classList.add("playing"); stopAuto(); });
       video.addEventListener("pause", () => { wrap.classList.remove("playing"); });
       video.addEventListener("ended", () => { wrap.classList.remove("playing"); });
+      video.addEventListener("error", () => { wrap.classList.add("video-error"); });
 
       wrap.appendChild(video);
       wrap.appendChild(playBtn);
