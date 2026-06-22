@@ -85,6 +85,23 @@ export async function initSchema() {
   `);
 
   await query(`
+    CREATE TABLE IF NOT EXISTS carousel_slides (
+      id VARCHAR(64) NOT NULL PRIMARY KEY,
+      image_path VARCHAR(500) NOT NULL,
+      media_type VARCHAR(16) NOT NULL DEFAULT 'image',
+      sort_order INT NOT NULL DEFAULT 0,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_carousel_order (sort_order)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  // Add media_type to existing installs that predate the column.
+  await query(`
+    ALTER TABLE carousel_slides
+    ADD COLUMN IF NOT EXISTS media_type VARCHAR(16) NOT NULL DEFAULT 'image'
+  `);
+
+  await query(`
     CREATE TABLE IF NOT EXISTS notices (
       id VARCHAR(64) NOT NULL PRIMARY KEY,
       title VARCHAR(200) NOT NULL,

@@ -1,6 +1,7 @@
 const state = {
   config: {},
   products: [],
+  carousel: [],
   cart: JSON.parse(localStorage.getItem("ksiraa-cart") || "{}"),
   notices: [],
   myOrders: [],
@@ -25,6 +26,7 @@ const els = {
   adminOrders: document.querySelector("#admin-orders"),
   adminCustomers: document.querySelector("#admin-customers"),
   adminNotices: document.querySelector("#admin-notices"),
+  adminCarousel: document.querySelector("#admin-carousel"),
   myOrders: document.querySelector("#my-orders"),
   orderSuccessModal: document.querySelector("#order-success-modal"),
   orderSuccessId: document.querySelector("#order-success-id"),
@@ -57,6 +59,183 @@ function bindOrderSuccessModal() {
   });
 }
 
+// Default slide shown when the admin hasn't uploaded any carousel images yet.
+const fallbackCarousel = [{ imageUrl: "assets/ksiraa-product.jpeg" }];
+let carouselTimer = null;
+
+function renderHeroCarousel() {
+  const carousel = document.querySelector("#hero-carousel");
+  const track = document.querySelector("#carousel-track");
+  if (!carousel || !track) return;
+
+  if (carouselTimer) {
+    clearInterval(carouselTimer);
+    carouselTimer = null;
+  }
+
+  // Stops auto-advance (used when a user starts playing a video).
+  const stopAuto = () => {
+    if (carouselTimer) clearInterval(carouselTimer);
+    carouselTimer = null;
+  };
+
+  const images = (state.carousel && state.carousel.length) ? state.carousel : fallbackCarousel;
+  const prevBtn = carousel.querySelector("#carousel-prev");
+  const nextBtn = carousel.querySelector("#carousel-next");
+  const dotsWrap = carousel.querySelector("#carousel-dots");
+
+  track.innerHTML = "";
+  dotsWrap.innerHTML = "";
+  // Holds the play/pause wiring for each video slide so the rotation logic can pause/check them.
+  const videoControllers = [];
+  images.forEach((slide) => {
+    const wrap = document.createElement("div");
+    wrap.className = "carousel-slide";
+    if (slide.mediaType === "video") {
+      wrap.classList.add("is-video");
+      const video = document.createElement("video");
+      video.src = slide.imageUrl;
+      video.loop = false;
+      video.playsInline = true;
+      video.setAttribute("playsinline", "");
+      video.preload = "metadata";
+
+      const playBtn = document.createElement("button");
+      playBtn.type = "button";
+      playBtn.className = "carousel-play";
+      playBtn.setAttribute("aria-label", "Play video");
+      playBtn.innerHTML = '<span class="carousel-play-ring" aria-hidden="true"></span>' +
+        '<span class="carousel-play-core" aria-hidden="true">' +
+        '<svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><path d="M6 4.5v15a1 1 0 0 0 1.53.85l12-7.5a1 1 0 0 0 0-1.7l-12-7.5A1 1 0 0 0 6 4.5z"/></svg>' +
+        '</span>';
+
+      const toggle = (event) => {
+        event.stopPropagation();
+        if (video.paused) {
+          stopAuto();                 // user is watching — don't advance the carousel
+          video.play();
+        } else {
+          video.pause();
+        }
+      };
+      playBtn.addEventListener("click", toggle);
+      video.addEventListener("click", toggle);
+      video.addEventListener("play", () => { wrap.classList.add("playing"); stopAuto(); });
+      video.addEventListener("pause", () => { wrap.classList.remove("playing"); });
+      video.addEventListener("ended", () => { wrap.classList.remove("playing"); });
+
+      wrap.appendChild(video);
+      wrap.appendChild(playBtn);
+      videoControllers.push({ video });
+    } else {
+      const img = document.createElement("img");
+      img.src = slide.imageUrl;
+      img.alt = "KSiraa";
+      img.loading = "lazy";
+      wrap.appendChild(img);
+    }
+    track.appendChild(wrap);
+  });
+
+  const single = images.length <= 1;
+  prevBtn?.classList.toggle("hidden", single);
+  nextBtn?.classList.toggle("hidden", single);
+  if (single) {
+    track.style.transform = "translateX(0)";
+    return;
+  }
+
+  // Clone the first slide and append it, so advancing past the last slide can
+  // animate forward into the clone, then snap (no transition) back to the real first.
+  const firstClone = track.firstElementChild.cloneNode(true);
+  firstClone.setAttribute("aria-hidden", "true");
+  track.appendChild(firstClone);
+
+  const realCount = images.length;
+  let position = 0; // 0..realCount (realCount === the clone)
+  const setTransform = (animate) => {
+    track.style.transition = animate ? "transform 0.5s ease" : "none";
+    track.style.transform = `translateX(-${position * 100}%)`;
+  };
+  const syncDots = () => {
+    const active = position % realCount;
+    dotsWrap.querySelectorAll(".carousel-dot").forEach((dot, i) => {
+      dot.classList.toggle("active", i === active);
+      dot.setAttribute("aria-selected", i === active ? "true" : "false");
+    });
+  };
+
+  const next = () => {
+    if (position >= realCount) return; // already animating into clone
+    position += 1;
+    setTransform(true);
+    syncDots();
+  };
+  const prev = () => {
+    if (position <= 0) {
+      // Jump (no animation) to the clone position, then animate back one step.
+      position = realCount;
+      setTransform(false);
+      void track.offsetWidth; // force reflow so the next transition animates
+    }
+    position -= 1;
+    setTransform(true);
+    syncDots();
+  };
+  const goTo = (index) => {
+    position = index;
+    setTransform(true);
+    syncDots();
+  };
+
+  // After the forward animation into the clone finishes, snap back to the real first slide.
+  track.addEventListener("transitionend", () => {
+    if (position >= realCount) {
+      position = 0;
+      setTransform(false);
+    }
+  });
+
+  const anyVideoPlaying = () => videoControllers.some((c) => !c.video.paused && !c.video.ended);
+  const pauseAllVideos = () => videoControllers.forEach((c) => { if (!c.video.paused) c.video.pause(); });
+
+  const start = () => {
+    if (carouselTimer) clearInterval(carouselTimer);
+    if (anyVideoPlaying()) return; // don't auto-advance while a video is playing
+    carouselTimer = setInterval(next, 5000);
+  };
+
+  // Manual navigation: stop any playing video so it doesn't keep going off-screen.
+  const navNext = () => { pauseAllVideos(); next(); start(); };
+  const navPrev = () => { pauseAllVideos(); prev(); start(); };
+
+  images.forEach((_, i) => {
+    const dot = document.createElement("button");
+    dot.type = "button";
+    dot.className = "carousel-dot";
+    dot.setAttribute("role", "tab");
+    dot.setAttribute("aria-label", `Go to image ${i + 1}`);
+    dot.addEventListener("click", () => { pauseAllVideos(); goTo(i); start(); });
+    dotsWrap.appendChild(dot);
+  });
+
+  nextBtn.onclick = navNext;
+  prevBtn.onclick = navPrev;
+  carousel.onmouseenter = stopAuto;
+  carousel.onmouseleave = start;
+
+  // When a played video finishes or is paused, resume the auto-rotation.
+  videoControllers.forEach((c) => {
+    c.video.addEventListener("ended", start);
+    c.video.addEventListener("pause", start);
+  });
+
+  position = 0;
+  setTransform(false);
+  syncDots();
+  start();
+}
+
 async function refreshPublicData() {
   const [config, products, notices] = await Promise.all([
     api("/api/config"),
@@ -66,6 +245,13 @@ async function refreshPublicData() {
   state.config = config;
   state.products = products.products;
   state.notices = notices.notices;
+  // Carousel is optional — a failure here (e.g. older server) must not blank the page.
+  try {
+    const carousel = await api("/api/carousel");
+    state.carousel = carousel.slides || [];
+  } catch {
+    state.carousel = [];
+  }
   const adminPhoneInput = document.querySelector("#admin-phone");
   if (adminPhoneInput) adminPhoneInput.value = config.adminPhone;
 }
@@ -89,9 +275,9 @@ function bindNavigation() {
     }
   });
 
-  document.querySelectorAll(".tab[data-view]").forEach((tab) => {
+  document.querySelectorAll("[data-view]").forEach((tab) => {
     tab.addEventListener("click", async () => {
-      document.querySelectorAll(".tab[data-view]").forEach((item) => item.classList.remove("active"));
+      document.querySelectorAll("[data-view]").forEach((item) => item.classList.remove("active"));
       tab.classList.add("active");
       document.querySelectorAll(".view-section").forEach((section) => section.classList.add("hidden"));
       document.querySelector(".notice-band").classList.add("hidden");
@@ -122,7 +308,37 @@ function bindNavigation() {
       const onHome = location.pathname.endsWith("/") || location.pathname.endsWith("index.html");
       if (!onHome) return;
       event.preventDefault();
+      document.querySelectorAll("[data-view]").forEach((item) => item.classList.remove("active"));
+      document.querySelectorAll(".view-section").forEach((section) => section.classList.add("hidden"));
+      document.querySelector("#shop-view")?.classList.remove("hidden");
+      document.querySelector("#products-view")?.classList.remove("hidden");
+      document.querySelector(".notice-band")?.classList.remove("hidden");
       window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  }
+
+  const menuToggle = document.querySelector("#nav-menu-toggle");
+  const menuDropdown = document.querySelector("#nav-menu-dropdown");
+  if (menuToggle && menuDropdown) {
+    const closeMenu = () => {
+      menuDropdown.classList.add("hidden");
+      menuToggle.setAttribute("aria-expanded", "false");
+    };
+    const openMenu = () => {
+      menuDropdown.classList.remove("hidden");
+      menuToggle.setAttribute("aria-expanded", "true");
+    };
+    menuToggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (menuDropdown.classList.contains("hidden")) openMenu();
+      else closeMenu();
+    });
+    menuDropdown.addEventListener("click", () => closeMenu());
+    document.addEventListener("click", (event) => {
+      if (!menuDropdown.contains(event.target) && !menuToggle.contains(event.target)) closeMenu();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeMenu();
     });
   }
 
@@ -130,30 +346,16 @@ function bindNavigation() {
     link.addEventListener("click", (event) => {
       event.preventDefault();
       document.querySelector('.tab[data-view="shop"]')?.classList.add("active");
-      const hero = document.querySelector(".hero");
-      const heroImg = hero?.querySelector(".hero-media img") || hero?.querySelector(".hero-media");
       const topbar = document.querySelector(".topbar");
       const topbarH = topbar ? topbar.getBoundingClientRect().height : 0;
-      let target;
-      if (heroImg) {
-        const rect = heroImg.getBoundingClientRect();
-        target = rect.bottom + window.scrollY - topbarH - 16;
-      } else {
-        const products = document.querySelector("#products-view");
-        target = products ? products.getBoundingClientRect().top + window.scrollY - topbarH - 16 : 0;
-      }
+      const products = document.querySelector("#products-view");
+      const target = products ? products.getBoundingClientRect().top + window.scrollY - topbarH - 16 : 0;
       window.scrollTo({ top: target, behavior: "smooth" });
     });
   });
 }
 
 function bindOrderActions() {
-  document.querySelector("#refresh-products").addEventListener("click", async () => {
-    await refreshPublicData();
-    renderAll();
-  });
-
-
   document.querySelector("#place-order").addEventListener("click", async (event) => {
     const payload = orderPayload();
     if (!payload) return;
@@ -243,6 +445,68 @@ function bindAdminActions() {
     await loadAdminDashboard();
     renderAll();
     toast("Product added.");
+  });
+
+  const carouselFile = document.querySelector("#carousel-file");
+  const carouselPreview = document.querySelector("#carousel-preview");
+  const carouselPreviewVideo = document.querySelector("#carousel-preview-video");
+  carouselFile?.addEventListener("change", () => {
+    const file = carouselFile.files?.[0];
+    carouselPreview?.classList.add("hidden");
+    carouselPreviewVideo?.classList.add("hidden");
+    if (!file) return;
+    const isVideo = file.type.startsWith("video/");
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (isVideo && carouselPreviewVideo) {
+        carouselPreviewVideo.src = reader.result;
+        carouselPreviewVideo.classList.remove("hidden");
+      } else if (carouselPreview) {
+        carouselPreview.src = reader.result;
+        carouselPreview.classList.remove("hidden");
+      }
+    };
+    reader.readAsDataURL(file);
+  });
+
+  document.querySelector("#carousel-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const file = carouselFile?.files?.[0];
+    if (!file) {
+      toast("Choose an image or video to upload.");
+      return;
+    }
+    const isVideo = file.type.startsWith("video/");
+    const maxBytes = isVideo ? 40 * 1024 * 1024 : 6 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      toast(isVideo ? "Video is too large (max 40 MB)." : "Image is too large (max 6 MB).");
+      return;
+    }
+    const dataUrl = await fileToDataUrl(file);
+    await api("/api/admin/carousel", {
+      method: "POST",
+      token: state.adminToken,
+      body: { image: dataUrl }
+    });
+    event.target.reset();
+    carouselPreview?.classList.add("hidden");
+    carouselPreviewVideo?.classList.add("hidden");
+    await refreshPublicData();
+    renderAll();
+    toast(isVideo ? "Video added to carousel." : "Image added to carousel.");
+  });
+
+  els.adminCarousel?.addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-action='delete-slide']");
+    if (!button) return;
+    if (!confirm("Remove this item from the carousel?")) return;
+    await api(`/api/admin/carousel/${encodeURIComponent(button.dataset.id)}`, {
+      method: "DELETE",
+      token: state.adminToken
+    });
+    await refreshPublicData();
+    renderAll();
+    toast("Removed.");
   });
 
   els.adminProducts.addEventListener("click", async (event) => {
@@ -504,6 +768,7 @@ function renderAll() {
   renderSummary();
   renderAdmin();
   renderMyOrders();
+  renderHeroCarousel();
 }
 
 function renderNotices() {
@@ -578,6 +843,35 @@ function renderAdmin() {
   renderAdminOrders();
   renderAdminCustomers();
   renderAdminNotices();
+  renderAdminCarousel();
+}
+
+function renderAdminCarousel() {
+  if (!els.adminCarousel) return;
+  const slides = state.carousel || [];
+  if (!slides.length) {
+    els.adminCarousel.innerHTML = `<div class="empty-state">No carousel items yet. The default product image is shown.</div>`;
+    return;
+  }
+  els.adminCarousel.innerHTML = slides.map((slide, i) => {
+    const media = slide.mediaType === "video"
+      ? `<video src="${escapeHtml(slide.imageUrl)}" muted loop playsinline></video>`
+      : `<img src="${escapeHtml(slide.imageUrl)}" alt="Slide ${i + 1}">`;
+    return `
+    <div class="carousel-admin-row">
+      ${media}
+      <button class="mini-button danger" data-action="delete-slide" data-id="${escapeHtml(slide.id)}" type="button">Delete</button>
+    </div>`;
+  }).join("");
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Could not read the image file."));
+    reader.readAsDataURL(file);
+  });
 }
 
 function renderAdminNotices() {

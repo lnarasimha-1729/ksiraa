@@ -9,36 +9,41 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=60">
+    <link rel="stylesheet" href="styles.css?v=81">
   </head>
   <body>
     <div class="app-shell">
       <header class="topbar">
-        <a class="brand" href="#shop" id="brand-home" aria-label="KSiraa home">
-          <img src="assets/ksiraa-logo.png" alt="KSiraa logo">
-          <span>
-            <strong>KSiraa</strong>
-            <small>Fresh dairy orders</small>
-          </span>
-        </a>
-        <nav class="tabs tabs-center" aria-label="Primary">
-          <a class="tab tab-link" href="index.html">Menu</a>
-          <a class="tab tab-link" href="about.html">About Us</a>
-        </nav>
-        <nav class="tabs" aria-label="Account">
-          <button class="tab" data-view="admin" type="button">Admin</button>
-        </nav>
+        <div class="topbar-inner">
+          <a class="brand" href="index.html" id="brand-home" aria-label="KSiraa home — menu">
+            <img src="assets/ksiraa-logo.png" alt="KSiraa logo">
+            <span>
+              <strong>KSiraa</strong>
+              <small>Fresh dairy orders</small>
+            </span>
+          </a>
+          <div class="nav-menu" id="nav-menu">
+            <button class="nav-menu-toggle" id="nav-menu-toggle" type="button" aria-label="More" aria-haspopup="true" aria-expanded="false">
+              <span class="nav-dots" aria-hidden="true">&#8942;</span>
+            </button>
+            <div class="nav-menu-dropdown hidden" id="nav-menu-dropdown" role="menu" aria-label="More options">
+              <a class="nav-menu-item" href="about.html" role="menuitem">About Us</a>
+              <button class="nav-menu-item" data-view="admin" type="button" role="menuitem">Admin</button>
+            </div>
+          </div>
+        </div>
       </header>
 
       <main>
-        <section class="hero view-section" id="shop-view">
-          <div class="hero-copy">
-            <p class="eyebrow">Pure desi ghee · Fresh dairy</p>
-            <h1>Fresh dairy, delivered without the phone calls.</h1>
-            <p class="lead">Choose products, save your address, place your order in a few taps.</p>
-          </div>
-          <div class="hero-media" aria-label="KSiraa ghee jar">
-            <img src="assets/ksiraa-product.jpeg" alt="KSiraa desi ghee jar packaging">
+        <section class="hero-banner view-section" id="shop-view" aria-label="KSiraa product gallery">
+          <div class="hero-banner-inner">
+            <div class="carousel" id="hero-carousel">
+              <!-- Slides are rendered from /api/carousel; managed in the admin panel. -->
+              <div class="carousel-track" id="carousel-track"></div>
+              <button class="carousel-arrow carousel-prev" id="carousel-prev" type="button" aria-label="Previous image">&#8249;</button>
+              <button class="carousel-arrow carousel-next" id="carousel-next" type="button" aria-label="Next image">&#8250;</button>
+              <div class="carousel-dots" id="carousel-dots" role="tablist" aria-label="Choose image"></div>
+            </div>
           </div>
         </section>
 
@@ -47,11 +52,7 @@
         <section class="order-layout view-section" id="products-view">
           <div class="catalog">
             <div class="section-heading">
-              <span>
-                <p class="eyebrow">Available now</p>
-                <h2>Products</h2>
-              </span>
-              <button class="small-action" id="refresh-products" type="button">Refresh</button>
+              <h2>Products</h2>
             </div>
             <div class="product-grid" id="product-grid"></div>
           </div>
@@ -163,6 +164,7 @@
                 <button class="tab active" data-admin-tab="orders" type="button">Orders</button>
                 <button class="tab" data-admin-tab="products" type="button">Products</button>
                 <button class="tab" data-admin-tab="customers" type="button">Customers</button>
+                <button class="tab" data-admin-tab="carousel" type="button">Carousel</button>
               </div>
             </div>
 
@@ -233,6 +235,27 @@
                 </div>
               </div>
             </div>
+
+            <div class="admin-tab-panel hidden" data-admin-panel="carousel">
+              <div class="admin-grid">
+                <div class="admin-card">
+                  <h3>Home page carousel</h3>
+                  <p class="helper-text">Images and videos shown in the rotating banner on the home page. If none are added, the default product image is shown.</p>
+                  <div class="carousel-admin-list" id="admin-carousel"></div>
+                </div>
+
+                <form class="admin-card" id="carousel-form">
+                  <h3>Add image or video</h3>
+                  <label>
+                    Choose file (JPG, PNG, WebP up to 6 MB — or MP4, WebM video up to 40 MB)
+                    <input id="carousel-file" type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm" required>
+                  </label>
+                  <img class="carousel-admin-preview hidden" id="carousel-preview" alt="Preview">
+                  <video class="carousel-admin-preview hidden" id="carousel-preview-video" muted loop playsinline></video>
+                  <button class="primary-action full" type="submit">Upload</button>
+                </form>
+              </div>
+            </div>
           </div>
         </section>
       </main>
@@ -278,6 +301,6 @@
       </article>
     </template>
 
-    <script src="app.js?v=58"></script>
+    <script src="app.js?v=70"></script>
   </body>
 </html>

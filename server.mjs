@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { createServer } from "node:http";
 import { randomBytes, scryptSync, timingSafeEqual, privateDecrypt, createDecipheriv, createCipheriv, constants as cryptoConstants } from "node:crypto";
 import { dirname, extname, join, normalize } from "node:path";
@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 
 const root = dirname(fileURLToPath(import.meta.url));
 loadEnvFile(join(root, ".env"));
+
+// Where admin-uploaded carousel images are stored on disk (served statically under /assets/carousel).
+const carouselDir = join(root, "assets", "carousel");
 
 // WhatsApp Flows private key (PEM), used to decrypt the encrypted data-exchange requests.
 // Prefer the inline env var (survives git deploys); fall back to the key file.
@@ -41,7 +44,10 @@ const types = {
   ".json": "application/json; charset=utf-8",
   ".jpeg": "image/jpeg",
   ".jpg": "image/jpeg",
-  ".png": "image/png"
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm"
 };
 
 const defaultProducts = [
@@ -162,6 +168,15 @@ function productRowToApi(row) {
   };
 }
 
+function carouselRowToApi(row) {
+  return {
+    id: row.id,
+    imageUrl: row.image_path,
+    mediaType: row.media_type || "image",
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at
+  };
+}
+
 function orderRowToApi(row) {
   return {
     id: row.id,
@@ -269,6 +284,12 @@ async function handleApi(request, response) {
   if (route === "GET /api/products") {
     const rows = await query("SELECT * FROM products ORDER BY sort_order ASC, created_at ASC");
     json(response, 200, { products: rows.map(productRowToApi) });
+    return;
+  }
+
+  if (route === "GET /api/carousel") {
+    const rows = await query("SELECT * FROM carousel_slides ORDER BY sort_order ASC, created_at ASC");
+    json(response, 200, { slides: rows.map(carouselRowToApi) });
     return;
   }
 
@@ -475,6 +496,32 @@ async function handleApi(request, response) {
     return;
   }
 
+  if (route === "POST /api/admin/carousel") {
+    await requireSession(request, "admin");
+    const body = await readJson(request, 56_000_000);
+    const saved = saveCarouselUpload(body.image);
+    const slideId = id("slide");
+    const [{ maxOrder }] = await query("SELECT COALESCE(MAX(sort_order), 0) + 1 AS maxOrder FROM carousel_slides");
+    await query(
+      "INSERT INTO carousel_slides (id, image_path, media_type, sort_order) VALUES (?, ?, ?, ?)",
+      [slideId, saved.urlPath, saved.mediaType, maxOrder]
+    );
+    const row = await one("SELECT * FROM carousel_slides WHERE id = ?", [slideId]);
+    json(response, 201, { slide: carouselRowToApi(row) });
+    return;
+  }
+
+  if (request.method === "DELETE" && url.pathname.startsWith("/api/admin/carousel/")) {
+    await requireSession(request, "admin");
+    const slideId = decodeURIComponent(url.pathname.split("/").pop() || "");
+    const existing = await one("SELECT * FROM carousel_slides WHERE id = ?", [slideId]);
+    if (!existing) return json(response, 404, { error: "Slide not found." });
+    await query("DELETE FROM carousel_slides WHERE id = ?", [existing.id]);
+    deleteCarouselFile(existing.image_path);
+    json(response, 200, { ok: true });
+    return;
+  }
+
   if (route === "POST /api/admin/whatsapp/send") {
     await requireSession(request, "admin");
     const body = await readJson(request);
@@ -640,12 +687,57 @@ function cleanChoice(value, allowed, fallback) {
   return allowed.includes(value) ? value : fallback;
 }
 
-function readJson(request) {
+// Accepts a data URL ("data:image/png;base64,...." or "data:video/mp4;base64,...."),
+// validates the type, writes it under assets/carousel/, and returns the public URL path + media type.
+const carouselMimeExt = {
+  "image/jpeg": { ext: ".jpg", type: "image" },
+  "image/jpg": { ext: ".jpg", type: "image" },
+  "image/png": { ext: ".png", type: "image" },
+  "image/webp": { ext: ".webp", type: "image" },
+  "video/mp4": { ext: ".mp4", type: "video" },
+  "video/webm": { ext: ".webm", type: "video" }
+};
+
+const carouselMaxImageBytes = 6_000_000;   // 6 MB
+const carouselMaxVideoBytes = 40_000_000;  // 40 MB
+
+function saveCarouselUpload(dataUrl) {
+  const match = /^data:([^;]+);base64,(.+)$/s.exec(String(dataUrl || ""));
+  if (!match) throw httpError(400, "Choose an image or video file to upload.");
+  const mime = match[1].toLowerCase();
+  const info = carouselMimeExt[mime];
+  if (!info) throw httpError(400, "Only JPG, PNG, WebP images or MP4/WebM videos are allowed.");
+  const buffer = Buffer.from(match[2], "base64");
+  if (!buffer.length) throw httpError(400, "The file could not be read.");
+  const maxBytes = info.type === "video" ? carouselMaxVideoBytes : carouselMaxImageBytes;
+  if (buffer.length > maxBytes) {
+    throw httpError(413, info.type === "video" ? "Video is too large (max 40 MB)." : "Image is too large (max 6 MB).");
+  }
+
+  if (!existsSync(carouselDir)) mkdirSync(carouselDir, { recursive: true });
+  const fileName = `${Date.now().toString(36)}_${randomBytes(4).toString("hex")}${info.ext}`;
+  writeFileSync(join(carouselDir, fileName), buffer);
+  return { urlPath: `/assets/carousel/${fileName}`, mediaType: info.type };
+}
+
+function deleteCarouselFile(urlPath) {
+  // Only delete files we manage, and never escape the carousel directory.
+  const name = String(urlPath || "").replace(/^\/assets\/carousel\//, "");
+  if (!name || name.includes("/") || name.includes("\\") || name.includes("..")) return;
+  const filePath = join(carouselDir, name);
+  try {
+    if (existsSync(filePath)) unlinkSync(filePath);
+  } catch (err) {
+    console.warn("[carousel] could not delete file:", err.message);
+  }
+}
+
+function readJson(request, maxBytes = 1_000_000) {
   return new Promise((resolve, reject) => {
     let data = "";
     request.on("data", (chunk) => {
       data += chunk;
-      if (data.length > 1_000_000) {
+      if (data.length > maxBytes) {
         request.destroy();
         reject(httpError(413, "Request is too large."));
       }
