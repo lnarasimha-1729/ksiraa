@@ -411,7 +411,13 @@ main {
 .hero-banner-inner {
   margin: 0 auto;
   max-width: 1240px;
-  padding: 24px clamp(20px, 5vw, 56px);
+  padding: 24px clamp(20px, 5vw, 56px) 8px;
+}
+
+/* Tighten the space between the carousel and the content directly below it. */
+.hero-banner + .notice-band,
+.hero-banner + .order-layout {
+  padding-top: 16px;
 }
 
 .eyebrow {
