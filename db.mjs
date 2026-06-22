@@ -1,7 +1,24 @@
 import mysql from "mysql2/promise";
+import { lookup } from "node:dns/promises";
+
+// The DB host resolves to both IPv6 and IPv4. On some networks the IPv6 route to
+// Hostinger hangs (ETIMEDOUT), so resolve to an IPv4 address up front and connect to that.
+async function resolveDbHost(host) {
+  if (!host) return host;
+  // Already an IP literal? Use as-is.
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":")) return host;
+  try {
+    const { address } = await lookup(host, { family: 4 });
+    return address || host;
+  } catch {
+    return host; // fall back to the hostname; let mysql2 try its own resolution
+  }
+}
+
+const dbHost = await resolveDbHost(process.env.DB_HOST);
 
 export const pool = mysql.createPool({
-  host: process.env.DB_HOST,
+  host: dbHost,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
@@ -11,7 +28,8 @@ export const pool = mysql.createPool({
   queueLimit: 0,
   charset: "utf8mb4",
   timezone: "Z",
-  dateStrings: false
+  dateStrings: false,
+  connectTimeout: 15000
 });
 
 export async function query(sql, params) {
