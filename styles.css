@@ -1247,10 +1247,24 @@ textarea {
   display: flex;
   justify-content: flex-start;
   margin: 4px 0 18px;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.admin-subtabs::-webkit-scrollbar {
+  display: none;
 }
 
 .admin-subtabs .tabs {
   display: inline-flex;
+  flex-wrap: nowrap;
+}
+
+.admin-subtabs .tab {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .admin-tab-panel {
