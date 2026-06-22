@@ -30,7 +30,9 @@
           "type": "array",
           "items": { "type": "object", "properties": { "id": { "type": "string" }, "title": { "type": "string" } } },
           "__example__": [ { "id": "1", "title": "1" }, { "id": "2", "title": "2" } ]
-        }
+        },
+        "has_error": { "type": "boolean", "__example__": false },
+        "error_message": { "type": "string", "__example__": "" }
       },
       "layout": {
         "type": "SingleColumnLayout",
@@ -67,6 +69,7 @@
               { "type": "TextCaption", "text": "${data.meta4}", "visible": "${data.vis4}" },
               { "type": "OptIn", "name": "p4", "label": "Add to order", "visible": "${data.vis4}", "required": false },
               { "type": "Dropdown", "name": "q4", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.vis4}", "required": false },
+              { "type": "TextBody", "text": "${data.error_message}", "visible": "${data.has_error}", "font-weight": "bold" },
               {
                 "type": "Footer",
                 "label": "Continue to address",

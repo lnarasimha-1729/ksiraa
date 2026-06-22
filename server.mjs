@@ -1019,7 +1019,9 @@ async function buildFlowProductsScreen() {
   const qtyOptions = Array.from({ length: 10 }, (_, n) => ({ id: String(n + 1), title: String(n + 1) }));
   const data = {
     row_ids: products.map((p) => p.id).join(","),
-    qty_options: qtyOptions
+    qty_options: qtyOptions,
+    has_error: false,
+    error_message: ""
   };
   for (let i = 0; i < FLOW_MAX_PRODUCT_ROWS; i++) {
     const p = products[i];
@@ -1109,10 +1111,18 @@ async function handleFlowDataExchange(request, response) {
   } else if (action === "INIT") {
     responseData = { screen: "PRODUCTS", data: await buildFlowProductsScreen() };
   } else if (action === "data_exchange" && screen === "PRODUCTS") {
-    // Products chosen → stash selections and show the address screen.
+    // Products chosen → validate at least one item, then stash and show the address screen.
     const selections = readProductSelections(data);
-    await saveFlowSelections(flowToken, selections);
-    responseData = { screen: "ADDRESS", data: await buildFlowAddressScreen(tokenPhone, selections) };
+    if (Object.keys(selections).length === 0) {
+      // Nothing selected — stay on PRODUCTS and show an error message.
+      responseData = {
+        screen: "PRODUCTS",
+        data: { ...(await buildFlowProductsScreen()), error_message: "Please select at least one product and a quantity before continuing.", has_error: true }
+      };
+    } else {
+      await saveFlowSelections(flowToken, selections);
+      responseData = { screen: "ADDRESS", data: await buildFlowAddressScreen(tokenPhone, selections) };
+    }
   } else if (action === "data_exchange" && screen === "ADDRESS") {
     // Address submitted → stash address with the selections; the nfm_reply webhook places the order.
     const selections = (await loadFlowSelections(flowToken)) || {};
