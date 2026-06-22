@@ -1338,8 +1338,8 @@ async function handleShoppingText(from, session, raw) {
   const products = await query("SELECT * FROM products WHERE sold_out = 0");
   const parsed = parseShoppingText(raw, products);
   if (!parsed.length) {
-    await sendCloudApiMessage(from, "I didn't catch that. Tap *Browse products* or type something like _2 ghee, 1 butter_. Type *cart* to view your items or *checkout* to confirm.");
-    await sendProductList(from);
+    await sendCloudApiMessage(from, "I didn't catch that. Tap *View products* below to browse, or type something like _2 ghee, 1 butter_. Type *cart* to view your items or *checkout* to confirm.");
+    await sendBrowseExperience(from);
     return;
   }
   session.cart = session.cart || {};
