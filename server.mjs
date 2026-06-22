@@ -901,13 +901,11 @@ async function buildFlowProductsScreen() {
   const qtyOptions = Array.from({ length: 10 }, (_, n) => ({ id: String(n + 1), title: String(n + 1) }));
   const data = {
     row_ids: products.map((p) => p.id).join(","),
-    qty_options: qtyOptions,
-    add_opt: [{ id: "yes", title: "Add to order" }]
+    qty_options: qtyOptions
   };
   for (let i = 0; i < FLOW_MAX_PRODUCT_ROWS; i++) {
     const p = products[i];
-    data[`name${i}`] = p ? p.name : "";
-    data[`meta${i}`] = p ? `${p.size} · Rs. ${p.price}` : "";
+    data[`name${i}`] = p ? `${p.name} — ${p.size} · Rs. ${p.price}` : "";
     data[`vis${i}`] = Boolean(p);
   }
   return data;
@@ -939,19 +937,14 @@ async function buildFlowAddressScreen(from, selections) {
   };
 }
 
-// Reads the add-chip (pN) + quantity (qN) form fields into { productId: qty }.
+// Reads the checkbox (pN) + quantity (qN) form fields into { productId: qty }.
 function readProductSelections(data) {
   const ids = String(data.ids || "").split(",").filter(Boolean);
   const selections = {};
   ids.forEach((id, i) => {
-    const sel = data[`p${i}`];
-    // ChipsSelector returns a non-empty array (e.g. ["yes"]) when added;
-    // also accept legacy boolean true from the old OptIn checkbox.
-    const checked = (Array.isArray(sel) && sel.length > 0) || sel === true || sel === "true";
+    const checked = data[`p${i}`] === true || data[`p${i}`] === "true";
     if (!checked) return;
-    let q = data[`q${i}`];
-    if (Array.isArray(q)) q = q[0];
-    const qty = parseInt(String(q ?? "1").replace(/[^0-9]/g, ""), 10) || 1;
+    const qty = parseInt(String(data[`q${i}`] ?? "1").replace(/[^0-9]/g, ""), 10) || 1;
     selections[id] = qty;
   });
   return selections;
