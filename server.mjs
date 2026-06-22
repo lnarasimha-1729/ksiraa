@@ -1044,17 +1044,20 @@ async function buildFlowAddressScreen(from, selections) {
     total += p.price * qty;
     lines.push(`${qty} × ${p.name}`);
   }
-  const cartSummary = lines.length ? `${lines.join(", ")}\nTotal: Rs. ${total}` : "No items selected.";
+  const cartSummary = lines.length ? `🛒 ${lines.join("\n🛒 ")}\n\nTotal: Rs. ${total}` : "No items selected.";
 
   const localPhone = normalizeLocalPhone(from);
   const customer = await one("SELECT * FROM customers WHERE phone = ?", [localPhone]).catch(() => null);
+  // Saved address is one combined string ("house, street, city, pincode").
+  // Best-effort split back into the four fields to prefill them.
+  const parts = String(customer?.address || "").split(",").map((s) => s.trim());
   return {
     cart_summary: cartSummary,
     def_name: customer?.name || "",
-    def_house: "",
-    def_street: "",
-    def_city: "",
-    def_pincode: ""
+    def_house: parts[0] || "",
+    def_street: parts[1] || "",
+    def_city: parts[2] || "",
+    def_pincode: parts[3] || ""
   };
 }
 

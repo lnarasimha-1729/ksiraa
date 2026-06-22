@@ -111,21 +111,32 @@
         "children": [
           {
             "type": "TextHeading",
-            "text": "Where should we deliver?"
+            "text": "Your order"
           },
           {
             "type": "TextBody",
             "text": "${data.cart_summary}"
           },
           {
+            "type": "TextSubheading",
+            "text": "Where should we deliver?"
+          },
+          {
             "type": "Form",
             "name": "address_form",
+            "init-values": {
+              "name": "${data.def_name}",
+              "house": "${data.def_house}",
+              "street": "${data.def_street}",
+              "city": "${data.def_city}",
+              "pincode": "${data.def_pincode}"
+            },
             "children": [
               { "type": "TextInput", "name": "name", "label": "Full name", "input-type": "text", "required": true },
               { "type": "TextInput", "name": "house", "label": "House / flat no.", "input-type": "text", "required": true },
               { "type": "TextInput", "name": "street", "label": "Street / area", "input-type": "text", "required": true },
               { "type": "TextInput", "name": "city", "label": "City", "input-type": "text", "required": true },
-              { "type": "TextInput", "name": "pincode", "label": "Pincode", "input-type": "number", "required": true },
+              { "type": "TextInput", "name": "pincode", "label": "Pincode", "input-type": "text", "required": true },
               {
                 "type": "Footer",
                 "label": "Place order",
