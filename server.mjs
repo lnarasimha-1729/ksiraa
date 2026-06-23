@@ -545,20 +545,15 @@ async function handleApi(request, response) {
     const message = cleanText(body.message, 1000);
     if (!title || !message) return json(response, 400, { error: "Title and message are required." });
     const customerIds = Array.isArray(body.customerIds) ? body.customerIds : [];
-    const toAll = body.toAll === true;
-    if (!toAll && !customerIds.length) return json(response, 400, { error: "Select at least one customer." });
+    // WhatsApp is only ever sent to explicitly selected customers — no send-to-all.
+    if (!customerIds.length) return json(response, 400, { error: "Select at least one customer." });
 
-    let rows;
-    if (toAll) {
-      rows = await query("SELECT id, phone, name FROM customers");
-    } else {
-      const placeholders = customerIds.map(() => "?").join(",");
-      rows = await query(`SELECT id, phone, name FROM customers WHERE id IN (${placeholders})`, customerIds);
-    }
+    const placeholders = customerIds.map(() => "?").join(",");
+    const rows = await query(`SELECT id, phone, name FROM customers WHERE id IN (${placeholders})`, customerIds);
     const recipients = rows
       .map((r) => ({ phone: normalizeWhatsAppPhone(r.phone), name: (r.name || "Customer").trim() || "Customer" }))
       .filter((r) => r.phone);
-    if (!recipients.length) return json(response, 400, { error: toAll ? "No customers with valid phone numbers." : "No valid phone numbers in selection." });
+    if (!recipients.length) return json(response, 400, { error: "No valid phone numbers in selection." });
 
     const result = await sendWhatsAppBroadcastTemplate(recipients, title, message);
     json(response, 200, {
