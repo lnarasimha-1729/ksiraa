@@ -1644,7 +1644,12 @@ async function placeWhatsAppOrder(from, session) {
   session.cart = {};
   await saveWaSession(from, session);
 
-  await sendCloudApiMessage(from, `✅ *Order confirmed!*\n\nOrder ID: *${orderId}*\nTotal: Rs. ${total}\nPayment: ${paymentMethod}\n\nWe'll deliver soon. Type *hi* anytime to order again.`);
+  const itemLines = items.map((it) => `• ${it.qty} × ${it.name} (${it.size}) — Rs. ${it.lineTotal}`).join("\n");
+  const deliveryLine = delivery === 0 ? "Delivery: Free" : `Delivery: Rs. ${delivery}`;
+  await sendCloudApiMessage(
+    from,
+    `✅ *Order confirmed!*\n\nOrder ID: *${orderId}*\n\n*Your items:*\n${itemLines}\n\nSubtotal: Rs. ${subtotal}\n${deliveryLine}\n*Total: Rs. ${total}*\n\nPayment: ${paymentMethod}\nDeliver to: ${customer.name}, ${customer.address}\n\nWe'll deliver soon. Type *hi* anytime to order again.`
+  );
 
   // Notify owner async (same pattern as website orders)
   getOwnerWhatsApp()
