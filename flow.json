@@ -2,104 +2,16 @@
   "version": "7.0",
   "data_api_version": "3.0",
   "routing_model": {
-    "PRODUCTS": ["ADDRESS"],
     "ADDRESS": []
   },
   "screens": [
-    {
-      "id": "PRODUCTS",
-      "title": "Choose products",
-      "data": {
-        "row_ids": { "type": "string", "__example__": "ghee-500,butter-250,paneer-250,milk-1l,curd-500" },
-        "name0": { "type": "string", "__example__": "Pure Desi Ghee" },
-        "name1": { "type": "string", "__example__": "Fresh Butter" },
-        "name2": { "type": "string", "__example__": "Paneer" },
-        "name3": { "type": "string", "__example__": "Full Cream Milk" },
-        "name4": { "type": "string", "__example__": "Curd" },
-        "meta0": { "type": "string", "__example__": "500 g jar · Rs. 699" },
-        "meta1": { "type": "string", "__example__": "250 g · Rs. 220" },
-        "meta2": { "type": "string", "__example__": "250 g · Rs. 90" },
-        "meta3": { "type": "string", "__example__": "1 L · Rs. 70" },
-        "meta4": { "type": "string", "__example__": "500 g · Rs. 60" },
-        "vis0": { "type": "boolean", "__example__": true },
-        "vis1": { "type": "boolean", "__example__": true },
-        "vis2": { "type": "boolean", "__example__": true },
-        "vis3": { "type": "boolean", "__example__": true },
-        "vis4": { "type": "boolean", "__example__": true },
-        "qty_options": {
-          "type": "array",
-          "items": { "type": "object", "properties": { "id": { "type": "string" }, "title": { "type": "string" } } },
-          "__example__": [ { "id": "1", "title": "1" }, { "id": "2", "title": "2" } ]
-        },
-        "has_error": { "type": "boolean", "__example__": false },
-        "error_message": { "type": "string", "__example__": "" }
-      },
-      "layout": {
-        "type": "SingleColumnLayout",
-        "children": [
-          {
-            "type": "TextHeading",
-            "text": "Select your items"
-          },
-          {
-            "type": "TextBody",
-            "text": "Tick the products you want and choose a quantity for each."
-          },
-          {
-            "type": "Form",
-            "name": "products_form",
-            "init-values": {
-              "q0": "1", "q1": "1", "q2": "1", "q3": "1", "q4": "1"
-            },
-            "children": [
-              { "type": "TextSubheading", "text": "${data.name0}", "visible": "${data.vis0}" },
-              { "type": "TextCaption", "text": "${data.meta0}", "visible": "${data.vis0}" },
-              { "type": "OptIn", "name": "p0", "label": "Add to cart", "visible": "${data.vis0}", "required": false },
-              { "type": "Dropdown", "name": "q0", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.vis0}", "required": true },
-              { "type": "TextSubheading", "text": "${data.name1}", "visible": "${data.vis1}" },
-              { "type": "TextCaption", "text": "${data.meta1}", "visible": "${data.vis1}" },
-              { "type": "OptIn", "name": "p1", "label": "Add to cart", "visible": "${data.vis1}", "required": false },
-              { "type": "Dropdown", "name": "q1", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.vis1}", "required": true },
-              { "type": "TextSubheading", "text": "${data.name2}", "visible": "${data.vis2}" },
-              { "type": "TextCaption", "text": "${data.meta2}", "visible": "${data.vis2}" },
-              { "type": "OptIn", "name": "p2", "label": "Add to cart", "visible": "${data.vis2}", "required": false },
-              { "type": "Dropdown", "name": "q2", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.vis2}", "required": true },
-              { "type": "TextSubheading", "text": "${data.name3}", "visible": "${data.vis3}" },
-              { "type": "TextCaption", "text": "${data.meta3}", "visible": "${data.vis3}" },
-              { "type": "OptIn", "name": "p3", "label": "Add to cart", "visible": "${data.vis3}", "required": false },
-              { "type": "Dropdown", "name": "q3", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.vis3}", "required": true },
-              { "type": "TextSubheading", "text": "${data.name4}", "visible": "${data.vis4}" },
-              { "type": "TextCaption", "text": "${data.meta4}", "visible": "${data.vis4}" },
-              { "type": "OptIn", "name": "p4", "label": "Add to cart", "visible": "${data.vis4}", "required": false },
-              { "type": "Dropdown", "name": "q4", "label": "Quantity", "data-source": "${data.qty_options}", "visible": "${data.vis4}", "required": true },
-              { "type": "TextBody", "text": "${data.error_message}", "visible": "${data.has_error}" },
-              {
-                "type": "Footer",
-                "label": "Continue to address",
-                "on-click-action": {
-                  "name": "data_exchange",
-                  "payload": {
-                    "ids": "${data.row_ids}",
-                    "p0": "${form.p0}", "q0": "${form.q0}",
-                    "p1": "${form.p1}", "q1": "${form.q1}",
-                    "p2": "${form.p2}", "q2": "${form.q2}",
-                    "p3": "${form.p3}", "q3": "${form.q3}",
-                    "p4": "${form.p4}", "q4": "${form.q4}"
-                  }
-                }
-              }
-            ]
-          }
-        ]
-      }
-    },
     {
       "id": "ADDRESS",
       "title": "Delivery address",
       "terminal": true,
       "success": true,
       "data": {
-        "cart_summary": { "type": "string", "__example__": "1 × Pure Desi Ghee" },
+        "cart_summary": { "type": "string", "__example__": "🛒 1 × Pure Desi Ghee\n\nTotal: Rs. 699" },
         "def_name": { "type": "string", "__example__": "" },
         "def_house": { "type": "string", "__example__": "" },
         "def_street": { "type": "string", "__example__": "" },
