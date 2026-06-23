@@ -1646,10 +1646,26 @@ async function placeWhatsAppOrder(from, session) {
 
   const itemLines = items.map((it) => `• ${it.qty} × ${it.name} (${it.size}) — Rs. ${it.lineTotal}`).join("\n");
   const deliveryLine = delivery === 0 ? "Delivery: Free" : `Delivery: Rs. ${delivery}`;
-  await sendCloudApiMessage(
-    from,
-    `✅ *Order confirmed!*\n\nOrder ID: *${orderId}*\n\n*Your items:*\n${itemLines}\n\nSubtotal: Rs. ${subtotal}\n${deliveryLine}\n*Total: Rs. ${total}*\n\nPayment: ${paymentMethod}\nDeliver to: ${customer.name}, ${customer.address}\n\nWe'll deliver soon. Type *hi* anytime to order again.`
-  );
+  const confirmBody = `✅ *Order confirmed!*\n\nOrder ID: *${orderId}*\n\n*Your items:*\n${itemLines}\n\nSubtotal: Rs. ${subtotal}\n${deliveryLine}\n*Total: Rs. ${total}*\n\nPayment: ${paymentMethod}\nDeliver to: ${customer.name}, ${customer.address}\n\nWe'll deliver soon.`;
+  const sent = await cloudApiRequest({
+    messaging_product: "whatsapp",
+    to: from,
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: confirmBody },
+      action: {
+        buttons: [
+          { type: "reply", reply: { id: "my_orders", title: "📦 Order status" } },
+          { type: "reply", reply: { id: "show_products", title: "🛒 Order again" } }
+        ]
+      }
+    }
+  });
+  // Fall back to a plain text message if the interactive send is unavailable.
+  if (!sent || !sent.ok) {
+    await sendCloudApiMessage(from, `${confirmBody}\n\nType *orders* to check your order status, or *hi* to order again.`);
+  }
 
   // Notify owner async (same pattern as website orders)
   getOwnerWhatsApp()
@@ -1897,8 +1913,29 @@ async function sendRecentOrders(to) {
   if (!orders.length) {
     return sendCloudApiMessage(to, "We don't have any orders for this number yet. Tap *Order Now* to place your first one.");
   }
-  const lines = orders.map((o) => `• ${o.id} — Rs. ${o.total} — ${o.status}`);
-  return sendCloudApiMessage(to, `📦 *Your recent orders*\n\n${lines.join("\n")}`);
+  const blocks = orders.map((o) => {
+    let items = [];
+    try { items = typeof o.items_json === "string" ? JSON.parse(o.items_json) : (o.items_json || []); } catch {}
+    const itemSummary = items.length
+      ? items.map((it) => `${it.qty} × ${it.name}`).join(", ")
+      : "";
+    const statusLine = `${orderStatusEmoji(o.status)} ${o.status}`;
+    return `*${o.id}* — Rs. ${o.total}\n${statusLine}${itemSummary ? `\n${itemSummary}` : ""}`;
+  });
+  return sendCloudApiMessage(to, `📦 *Your recent orders*\n\n${blocks.join("\n\n")}\n\nType *hi* to order again.`);
+}
+
+// Friendly emoji for each order status.
+function orderStatusEmoji(status) {
+  switch (String(status || "")) {
+    case "Received": return "🟡";
+    case "Preparing": return "👨‍🍳";
+    case "Out for delivery": return "🚚";
+    case "Delivered": return "✅";
+    case "Paused": return "⏸️";
+    case "Cancelled": return "❌";
+    default: return "📦";
+  }
 }
 
 async function cloudApiRequest(body) {
