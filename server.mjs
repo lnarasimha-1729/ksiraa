@@ -1920,9 +1920,26 @@ async function sendRecentOrders(to) {
       ? items.map((it) => `${it.qty} × ${it.name}`).join(", ")
       : "";
     const statusLine = `${orderStatusEmoji(o.status)} ${o.status}`;
-    return `*${o.id}* — Rs. ${o.total}\n${statusLine}${itemSummary ? `\n${itemSummary}` : ""}`;
+    const dateLine = formatOrderDate(o.created_at);
+    return `*${o.id}* — Rs. ${o.total}${dateLine ? `\n🗓️ ${dateLine}` : ""}\n${statusLine}${itemSummary ? `\n${itemSummary}` : ""}`;
   });
   return sendCloudApiMessage(to, `📦 *Your recent orders*\n\n${blocks.join("\n\n")}\n\nType *hi* to order again.`);
+}
+
+// Formats an order's created_at into a readable date+time, e.g. "23 Jun 2026, 12:41 pm".
+function formatOrderDate(value) {
+  if (!value) return "";
+  const d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d.getTime())) return "";
+  try {
+    return d.toLocaleString("en-IN", {
+      day: "2-digit", month: "short", year: "numeric",
+      hour: "numeric", minute: "2-digit", hour12: true,
+      timeZone: "Asia/Kolkata"
+    });
+  } catch {
+    return d.toDateString();
+  }
 }
 
 // Friendly emoji for each order status.
