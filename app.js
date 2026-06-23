@@ -754,20 +754,20 @@ function bindAdminActions() {
     }
 
     const selectedIds = Array.from(state.admin.selectedCustomerIds);
-    if (!selectedIds.length) {
-      const text = `KSiraa update\n\n${title}\n${message}`;
-      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+    // No customers ticked → send to everyone. Otherwise send to the selected customers.
+    const sendingToAll = !selectedIds.length;
+    if (sendingToAll && !confirm("No customers selected. Send this WhatsApp to ALL customers?")) {
       return;
     }
 
     button.disabled = true;
     const originalLabel = button.textContent;
-    button.textContent = `Sending to ${selectedIds.length}…`;
+    button.textContent = sendingToAll ? "Sending to all…" : `Sending to ${selectedIds.length}…`;
     try {
       const result = await api("/api/admin/whatsapp/send", {
         method: "POST",
         token: state.adminToken,
-        body: { title, message, customerIds: selectedIds }
+        body: { title, message, customerIds: selectedIds, toAll: sendingToAll }
       });
       if (result.demo) {
         toast(`Demo mode — ${result.sent} would be sent. Set WHATSAPP_PHONE_NUMBER_ID + WHATSAPP_ACCESS_TOKEN to enable real send.`);

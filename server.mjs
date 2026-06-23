@@ -483,7 +483,7 @@ async function handleApi(request, response) {
     await query("INSERT INTO notices (id, title, message) VALUES (?, ?, ?)", [noticeId, title, message]);
     const row = await one("SELECT * FROM notices WHERE id = ?", [noticeId]);
     const notice = noticeRowToApi(row);
-    await sendWhatsAppBroadcast(notice);
+    // Publishing posts to the website notice band only. Use "Send WhatsApp" to message customers.
     json(response, 201, { notice });
     return;
   }
@@ -545,14 +545,20 @@ async function handleApi(request, response) {
     const message = cleanText(body.message, 1000);
     if (!title || !message) return json(response, 400, { error: "Title and message are required." });
     const customerIds = Array.isArray(body.customerIds) ? body.customerIds : [];
-    if (!customerIds.length) return json(response, 400, { error: "Select at least one customer." });
+    const toAll = body.toAll === true;
+    if (!toAll && !customerIds.length) return json(response, 400, { error: "Select at least one customer." });
 
-    const placeholders = customerIds.map(() => "?").join(",");
-    const rows = await query(`SELECT id, phone, name FROM customers WHERE id IN (${placeholders})`, customerIds);
+    let rows;
+    if (toAll) {
+      rows = await query("SELECT id, phone, name FROM customers");
+    } else {
+      const placeholders = customerIds.map(() => "?").join(",");
+      rows = await query(`SELECT id, phone, name FROM customers WHERE id IN (${placeholders})`, customerIds);
+    }
     const recipients = rows
       .map((r) => ({ phone: normalizeWhatsAppPhone(r.phone), name: (r.name || "Customer").trim() || "Customer" }))
       .filter((r) => r.phone);
-    if (!recipients.length) return json(response, 400, { error: "No valid phone numbers in selection." });
+    if (!recipients.length) return json(response, 400, { error: toAll ? "No customers with valid phone numbers." : "No valid phone numbers in selection." });
 
     const result = await sendWhatsAppBroadcastTemplate(recipients, title, message);
     json(response, 200, {
