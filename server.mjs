@@ -1112,13 +1112,23 @@ async function handleFlowDataExchange(request, response) {
     // Health check from Meta.
     responseData = { data: { status: "active" } };
   } else if (action === "INIT") {
-    // Address-only flow: products are already in the customer's cart (picked via cards).
-    // Open straight to the ADDRESS screen with the cart summary + any saved address.
-    const cart = await loadCartForFlow(tokenPhone);
-    responseData = { screen: "ADDRESS", data: await buildFlowAddressScreen(tokenPhone, cart) };
+    responseData = { screen: "PRODUCTS", data: await buildFlowProductsScreen() };
+  } else if (action === "data_exchange" && screen === "PRODUCTS") {
+    // Products chosen → validate at least one item, then stash and show the address screen.
+    const selections = readProductSelections(data);
+    if (Object.keys(selections).length === 0) {
+      // Nothing selected — stay on PRODUCTS and show an error message.
+      responseData = {
+        screen: "PRODUCTS",
+        data: { ...(await buildFlowProductsScreen()), error_message: "Please select at least one product and a quantity before continuing.", has_error: true }
+      };
+    } else {
+      await saveFlowSelections(flowToken, selections);
+      responseData = { screen: "ADDRESS", data: await buildFlowAddressScreen(tokenPhone, selections) };
+    }
   } else if (action === "data_exchange" && screen === "ADDRESS") {
-    // Address submitted → stash address with the cart; the nfm_reply webhook places the order.
-    const selections = await loadCartForFlow(tokenPhone);
+    // Address submitted → stash address with the selections; the nfm_reply webhook places the order.
+    const selections = (await loadFlowSelections(flowToken)) || {};
     const address = {
       name: String(data.name || "").trim(),
       house: String(data.house || "").trim(),
@@ -1138,20 +1148,6 @@ async function handleFlowDataExchange(request, response) {
   const encrypted = encryptFlowResponse(responseData, aesKey, ivBuf);
   response.writeHead(200, { "Content-Type": "text/plain" });
   response.end(encrypted);
-}
-
-// Reads the customer's current cart ({ productId: qty }) from their WhatsApp session.
-// Used by the address-only flow, since products are picked via cards before the flow opens.
-async function loadCartForFlow(tokenPhone) {
-  if (!tokenPhone) return {};
-  const session = await loadWaSession(tokenPhone);
-  const cart = session.cart || {};
-  const out = {};
-  for (const [pid, qty] of Object.entries(cart)) {
-    const n = parseInt(String(qty).replace(/[^0-9]/g, ""), 10);
-    if (n > 0) out[pid] = n;
-  }
-  return out;
 }
 
 // Temporary store mapping a flow_token -> submitted selections (survives until the nfm_reply arrives).
@@ -1419,18 +1415,6 @@ async function sendCartSummary(to, session) {
 
 async function startCheckout(from, session, profileName) {
   const localPhone = normalizeLocalPhone(from);
-
-  // Preferred path: collect the delivery address via the WhatsApp Flow (cart is already built).
-  if (flowEnabled && flowId && flowPrivateKey) {
-    const result = await sendAddressFlow(from);
-    if (result && result.ok) {
-      session.step = "awaiting_flow_address";
-      await saveWaSession(from, session);
-      return;
-    }
-    console.error("[Flows] address flow send rejected, falling back to text:", result && result.error);
-  }
-
   const existing = await one("SELECT * FROM customers WHERE phone = ?", [localPhone]);
   if (existing && existing.name && existing.address) {
     session.profile = { name: existing.name, address: existing.address };
@@ -1752,16 +1736,22 @@ function productImageUrl(p) {
   return FALLBACK_PRODUCT_IMAGE;
 }
 
-// Products are picked via WhatsApp product cards. The Flow is used only to collect the
-// delivery address at checkout (so its "Your response" shows only address fields).
+// Chooses the best browse UI: the multi-select Flow if configured, otherwise product cards.
+// Only send the Flow when it is explicitly enabled AND published. Otherwise always
+// use the reliable product cards so the customer never gets a dead/empty reply.
 const flowEnabled = String(process.env.WHATSAPP_FLOW_ENABLED || "").toLowerCase() === "true";
 
 async function sendBrowseExperience(to) {
+  if (flowEnabled && flowId && flowPrivateKey) {
+    const result = await sendProductFlow(to);
+    if (result && result.ok) return;
+    console.error("[Flows] flow send rejected, falling back to cards:", result && result.error);
+  }
   await sendProductCards(to);
 }
 
-// Sends the WhatsApp Flow as an interactive flow message to collect the delivery address.
-async function sendAddressFlow(to) {
+// Sends the WhatsApp Flow as an interactive flow message (multi-select + quantity screens).
+async function sendProductFlow(to) {
   const flowToken = `ft_${to}_${Date.now()}_${randomBytes(4).toString("hex")}`;
   return cloudApiRequest({
     messaging_product: "whatsapp",
@@ -1769,8 +1759,8 @@ async function sendAddressFlow(to) {
     type: "interactive",
     interactive: {
       type: "flow",
-      header: { type: "text", text: "Delivery details" },
-      body: { text: "Confirm your order and enter your delivery address to place it." },
+      header: { type: "text", text: "KSiraa products" },
+      body: { text: "Browse our fresh dairy products, pick what you want with quantities, and place your order — all in one place." },
       footer: { text: "Fresh dairy delivered to your door" },
       action: {
         name: "flow",
@@ -1778,7 +1768,7 @@ async function sendAddressFlow(to) {
           flow_message_version: "3",
           flow_token: flowToken,
           flow_id: flowId,
-          flow_cta: "Enter address",
+          flow_cta: "View products",
           mode: "published",
           flow_action: "data_exchange"
         }
